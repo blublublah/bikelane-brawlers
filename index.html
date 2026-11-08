@@ -45,7 +45,7 @@ body{
 kbd{font-family:var(--body); font-weight:700; font-size:12px; color:var(--bg); background:var(--fg); border-radius:4px; padding:1px 6px; letter-spacing:.03em}
 body.touch{padding:0; gap:0}
 body.touch #stage{border-radius:0; box-shadow:none}
-body.touch #hud{left:env(safe-area-inset-left, 0px); right:env(safe-area-inset-right, 0px); width:auto}
+body.touch #hud{left:env(safe-area-inset-left, 0px); width:calc(100% - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px))}
 #rot{display:none; font-size:15px; color:var(--muted); text-align:center; padding:16px}
 @media (orientation:portrait){ body.touch #rot{display:block} }
 body.touch #legend{display:none}
@@ -118,16 +118,111 @@ function shade(hex, amt){
 }
 
 // ---------- audio ----------
-let AC = null, muted = false;
-function initAudio(){ if(AC) return; try{ AC = new (window.AudioContext||window.webkitAudioContext)(); }catch(e){} }
+// Everything is synthesised with Web Audio, so it works offline. Two buses: sound effects and music.
+let AC = null, muted = lsGet('bb3d_muted') === '1', master = null, sfxBus = null, musicBus = null, noiseBuf = null;
+function initAudio(){
+  if(AC){ if(AC.state === 'suspended' && !document.hidden) AC.resume().catch(()=>{}); return; }
+  try{ AC = new (window.AudioContext||window.webkitAudioContext)(); }catch(e){ return; }
+  master = AC.createGain(); master.gain.value = muted ? 0 : 1; master.connect(AC.destination);
+  sfxBus = AC.createGain(); sfxBus.gain.value = 1; sfxBus.connect(master);
+  musicBus = AC.createGain(); musicBus.gain.value = .55; musicBus.connect(master);
+  noiseBuf = AC.createBuffer(1, AC.sampleRate, AC.sampleRate);
+  const d = noiseBuf.getChannelData(0); for(let i=0;i<d.length;i++) d[i] = Math.random()*2 - 1;
+  if(AC.state === 'suspended') AC.resume().catch(()=>{});
+  startMusic(); startMotor();
+}
+function setMuted(m){
+  muted = m; lsSet('bb3d_muted', m ? '1' : '0');
+  if(master) master.gain.setTargetAtTime(m ? 0 : 1, AC.currentTime, .05);
+}
 function sfx(f, d=.1, type='square', slide=0, vol=.05){
-  if(!AC || muted) return;
+  if(!AC) return;
   const t = AC.currentTime, o = AC.createOscillator(), g = AC.createGain();
   o.type = type; o.frequency.setValueAtTime(f, t);
   if(slide) o.frequency.exponentialRampToValueAtTime(Math.max(30, f+slide), t+d);
   g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(.0001, t+d);
-  o.connect(g).connect(AC.destination); o.start(t); o.stop(t+d+.02);
+  o.connect(g).connect(sfxBus); o.start(t); o.stop(t+d+.02);
 }
+// filtered noise burst: crashes, landings, whooshes
+function noise(d=.25, vol=.12, freq=900, q=.8, type='lowpass', sweep=0){
+  if(!AC) return;
+  const t = AC.currentTime, src = AC.createBufferSource(), f = AC.createBiquadFilter(), g = AC.createGain();
+  src.buffer = noiseBuf; src.playbackRate.value = .5 + Math.random();
+  f.type = type; f.Q.value = q; f.frequency.setValueAtTime(freq, t);
+  if(sweep) f.frequency.exponentialRampToValueAtTime(Math.max(40, freq + sweep), t + d);
+  g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(.0001, t + d);
+  src.connect(f).connect(g).connect(sfxBus); src.start(t, Math.random()*.5); src.stop(t + d + .02);
+}
+const SND = {
+  jump(){ sfx(330, .18, 'triangle', 400, .05); noise(.2, .05, 1800, 1, 'bandpass', 1500); },
+  land(){ sfx(90, .08, 'triangle', 0, .06); noise(.09, .06, 500); },
+  punch(){ sfx(140, .12, 'sawtooth', -80, .07); noise(.12, .14, 1400, 1.2, 'bandpass', -700); },
+  whiff(){ noise(.12, .05, 2200, 2, 'bandpass', -1500); },
+  crash(){ noise(.6, .22, 1200, .7, 'lowpass', -1000); sfx(80, .45, 'sawtooth', -45, .08); setTimeout(() => noise(.25, .1, 3500, 3, 'bandpass', -2000), 90); },
+  bonk(){ noise(.3, .16, 900, .9, 'lowpass', -600); sfx(110, .25, 'square', -60, .06); },
+  boost(){ sfx(520, .25, 'triangle', 700, .05); noise(.5, .08, 600, 1.4, 'bandpass', 3000); },
+  star(){ [523, 659, 784, 1047].forEach((f, i) => setTimeout(() => sfx(f, .18, 'triangle', 0, .06), i*80)); },
+  finish(){ [523, 659, 784].forEach((f, i) => setTimeout(() => sfx(f, .2, 'triangle', 0, .07), i*120)); setTimeout(() => { sfx(1047, .7, 'triangle', 0, .07); sfx(784, .7, 'sine', 0, .05); }, 380); },
+};
+
+// scooter motor: a soft electric whine that rises with speed
+let motor = null;
+function startMotor(){
+  const o = AC.createOscillator(), o2 = AC.createOscillator(), f = AC.createBiquadFilter(), g = AC.createGain();
+  o.type = 'sawtooth'; o2.type = 'sine'; f.type = 'lowpass'; f.frequency.value = 900; g.gain.value = 0;
+  o.connect(f); o2.connect(f); f.connect(g).connect(sfxBus); o.start(); o2.start();
+  motor = { o, o2, g };
+}
+function motorTick(on, speed){
+  if(!motor) return;
+  const t = AC.currentTime, k = Math.min(1, speed / 700);
+  motor.o.frequency.setTargetAtTime(70 + 160*k, t, .1); motor.o2.frequency.setTargetAtTime(140 + 320*k, t, .1);
+  motor.g.gain.setTargetAtTime(on ? .006 + .012*k : 0, t, .15);
+}
+
+// soothing background music: slow major-seventh chords, a soft pad, a gentle plucked arpeggio and a quiet bass
+const CHORDS = [ // Fmaj7, Em7, Dm7, Cmaj7 (semitones from A4 = 440 Hz)
+  [-16, -12, -9, -5], [-17, -14, -10, -7], [-19, -16, -12, -9], [-21, -17, -14, -10]
+];
+const hz = n => 440 * Math.pow(2, n/12);
+let musicTimer = null, nextBeat = 0, beat = 0;
+const BEAT = 60/76;
+function pad(freq, t, d){
+  const g = AC.createGain(), f = AC.createBiquadFilter();
+  f.type = 'lowpass'; f.frequency.value = 1100;
+  g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(.022, t + d*.35); g.gain.linearRampToValueAtTime(0, t + d);
+  for(const det of [-6, 6]){ const o = AC.createOscillator(); o.type = 'triangle'; o.frequency.value = freq; o.detune.value = det; o.connect(f); o.start(t); o.stop(t + d + .05); }
+  f.connect(g).connect(musicBus);
+}
+function pluck(freq, t, vol=.04){
+  const o = AC.createOscillator(), g = AC.createGain(), f = AC.createBiquadFilter();
+  o.type = 'sine'; o.frequency.value = freq; f.type = 'lowpass'; f.frequency.value = 2400;
+  g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(vol, t + .01); g.gain.exponentialRampToValueAtTime(.0001, t + 1.1);
+  o.connect(f).connect(g).connect(musicBus); o.start(t); o.stop(t + 1.2);
+}
+function scheduleMusic(){
+  if(!AC || AC.state !== 'running') return;
+  while(nextBeat < AC.currentTime + .4){
+    const bar = Math.floor(beat / 8) % CHORDS.length, step = beat % 8, ch = CHORDS[bar], t = nextBeat;
+    if(step === 0){
+      for(const n of ch) pad(hz(n), t, BEAT*8 + .3);
+      pluck(hz(ch[0] - 12), t, .05); // bass
+    }
+    if(step === 4) pluck(hz(ch[0] - 12), t, .035);
+    const arp = [0, 2, 1, 3, 2, 1, 3, 2][step];
+    if(step % 2 === 0 || Math.random() < .5) pluck(hz(ch[arp] + 12), t + (step % 2 ? BEAT*.5 : 0), .022);
+    nextBeat += BEAT; beat++;
+  }
+}
+function startMusic(){
+  nextBeat = AC.currentTime + .2; beat = 0;
+  musicTimer = setInterval(scheduleMusic, 100);
+}
+document.addEventListener('visibilitychange', () => {
+  if(!AC) return;
+  if(document.hidden) AC.suspend().catch(()=>{});
+  else AC.resume().then(() => { nextBeat = Math.max(nextBeat, AC.currentTime + .1); }).catch(()=>{});
+});
 
 // =====================================================================
 // 3D scene
@@ -620,7 +715,7 @@ function jump(r){
   if(r.vz !== 0 || (r.z > 0 && !r.onVan) || r.jcd > 0 || r.wipe > 0) return;
   r.onVan = null;
   r.vz = 470; r.jcd = .2;
-  if(r.isPlayer) sfx(330, .18, 'square', 400, .04);
+  if(r.isPlayer) SND.jump();
 }
 
 function punch(a){
@@ -642,19 +737,19 @@ function punch(a){
     best.kvy = dir * 430; best.speed *= .72;
     burst(best.x, best.y, 1.5 + best.z*ZS, '#fff3b0', 12);
     text(best.x, best.y, pick(['POW!','WHAM!','BIFF!','SMACK!']), a.isPlayer ? '#ffcc1a' : '#ff6b5e', 2.4 + best.z*ZS);
-    if(a.isPlayer || best.isPlayer) sfx(140, .12, 'sawtooth', -80, .09);
+    if(a.isPlayer || best.isPlayer) SND.punch();
     if(best.isPlayer) shake = .35;
     if(best.hp <= 0){ wipeout(best); a.kos++; text(best.x, best.y, 'K.O.!', '#ff4d3d', 3.2); }
   } else {
     a.pDir = -a.pDir;
-    if(a.isPlayer) sfx(600, .06, 'triangle', -300, .03);
+    if(a.isPlayer) SND.whiff();
   }
 }
 
 function wipeout(r){
   r.wipe = 1.6; r.hp = 0; r.onVan = null; if(r.vz > 0) r.vz = 0;
   burst(r.x, r.y, .6, '#cfd3dc', 18);
-  if(r.isPlayer){ sfx(90, .45, 'sawtooth', -50, .1); shake = .6; }
+  if(r.isPlayer){ SND.crash(); shake = .6; }
 }
 
 const HIT = {
@@ -676,7 +771,7 @@ function launch(o, vx, vy, vz){
   o.fly = true; o.wrecked = false; o.skid = false; o.vx = vx; o.fvy = vy; o.vz = vz; o.hz = o.hz || 0; o.bounces = 0;
   o.rot = o.rot || { x:0, y:0, z:0 }; o.spin = { x: rand(-9, 9), y: rand(-7, 7), z: rand(-9, 9) };
   if(Math.abs(o.x - player.x) < 1400){
-    sfx(200, .28, 'sawtooth', -140, .06);
+    sfx(200, .28, 'sawtooth', -140, .05); noise(.4, .1, 2500, 1, 'bandpass', -2000);
     if(Math.random() < .6) text(o.x, o.y, pick(['YEET!','WHOOPS!','AIRMAIL!','SPLAT!']), '#ffd27a', 3);
     burst(o.x, o.y, 1, '#ffd27a', 8);
   }
@@ -728,7 +823,7 @@ function carCrash(a, b){
     startSkid(b, mx + e*dx, my + e*dy + side*rand(60, 180)*k, rand(2, 5)*k*(Math.random() < .5 ? -1 : 1), rand(60, 160)*k);
   }
   if(Math.abs(a.x - player.x) < 1600){
-    sfx(70, .45, 'sawtooth', -30, .1); sfx(400, .15, 'square', -300, .05);
+    SND.crash();
     text((a.x + b.x)/2, (a.y + b.y)/2, pick(['CRASH!','KERRUNCH!','FENDER BENDER!']), '#ff6b5e', 3.4);
     burst((a.x + b.x)/2, (a.y + b.y)/2, 1, '#cfe3ff', 16);
     if(Math.abs(a.x - player.x) < 500) shake = Math.max(shake, .3);
@@ -772,7 +867,7 @@ function collide(r, o){
     launch(o, Math.max(r.speed*2.4, o.vx*1.3) + 600, side*rand(350, 750), rand(1150, 1500));
     o.skid = false; o.parked = false; if(o.haz) o.haz.forEach(m => m.visible = false); o.haz = null;
     if(r.onVan === o) r.onVan = null;
-    if(r.isPlayer){ text(o.x, o.y, pick(['SMASH!','OUTTA MY LANE!','BOWLED OVER!']), '#ffcc1a', 3.2); shake = Math.max(shake, .35); sfx(90, .3, 'sawtooth', -40, .09); }
+    if(r.isPlayer){ text(o.x, o.y, pick(['SMASH!','OUTTA MY LANE!','BOWLED OVER!']), '#ffcc1a', 3.2); shake = Math.max(shake, .35); SND.bonk(); }
     return;
   }
   const h = HIT[o.type];
@@ -784,7 +879,7 @@ function collide(r, o){
   burst(r.x + 18, r.y, .8, '#ffd27a', 10);
   if(r.isPlayer){
     text(r.x, r.y, pick(h.msg), '#ff6b5e', 2.6);
-    sfx(o.type==='pothole'?160:110, .2, 'square', -60, .08);
+    SND.bonk();
     shake = Math.max(shake, o.type==='pothole'||o.type==='cone' ? .15 : .4);
   }
   if(o.type==='cone'){ o.dead = true; burst(o.x, o.y, .4, '#ff6a13', 8); }
@@ -886,14 +981,15 @@ function updateRacer(r, dt){
       }
     }
     const g = r.onVan ? roofOf(r.onVan) : 0;
-    if(r.z <= g){ r.z = g; r.vz = 0; if(r.isPlayer) sfx(90, .08, 'triangle', 0, .05); }
+    if(r.z <= g){ r.z = g; r.vz = 0; if(r.isPlayer) SND.land(); }
   }
   r.x += r.speed * dt;
   if(!r.finished && r.x >= FINISH){
-    r.finished = true; r.ftime = raceT; r.place = ++finishCount;
+    // time the exact moment the line was crossed within this frame, so racers finishing together still get distinct times
+    r.finished = true; r.ftime = raceT - (r.x - FINISH) / Math.max(1, r.speed); r.place = ++finishCount;
     if(r.isPlayer){
-      sfx(520,.15,'square',0,.06); setTimeout(()=>sfx(780,.3,'square',0,.06),150);
-      if(!best || raceT < best){ best = raceT; r.newBest = true; lsSet('bb3d_best', String(best)); }
+      SND.finish();
+      if(!best || r.ftime < best){ best = r.ftime; r.newBest = true; lsSet('bb3d_best', String(best)); }
     }
   }
 }
@@ -905,6 +1001,7 @@ function update(dt){
   fx = fx.filter(f => f.t > 0);
   shake = Math.max(0, shake - 1.6*dt);
 
+  if(AC) motorTick((mode === 'race' || mode === 'finish') && player.wipe <= 0, player.speed);
   if(mode === 'title'){ titleT += dt; return; }
   if(mode === 'paused') return;
   if(mode === 'countdown'){
@@ -916,8 +1013,7 @@ function update(dt){
     return;
   }
 
-  raceT += player.finished ? 0 : dt;
-  if(player.finished) raceT = player.ftime;
+  raceT += dt; // keeps running after you finish so the other racers get their own times
 
   const ctrl = !player.finished && player.wipe <= 0;
   player.steer = !ctrl ? 0 : touchY !== null ? clamp((touchY - player.y)/10, -1, 1) : ((keys.right?1:0) - (keys.left?1:0));
@@ -970,7 +1066,7 @@ function update(dt){
         if(o.tv){ // power-slide: the body swings out past the line it is driving, tyres smoking
           o.a = o.ang + .75*Math.sin(o.ang*2);
           if(Math.random() < .7) parts.push({ x: o.x - Math.cos(o.a)*45, y: o.y - Math.sin(o.a)*45, h: .3, vx: rand(-40, 40), vy: rand(-40, 40), vh: rand(.5, 1.5), t: rand(.5, .9), col: '#d9dbe0' });
-          if(!o.screech && Math.abs(o.x - player.x) < 1500){ o.screech = true; sfx(1300, .55, 'sawtooth', -500, .035); }
+          if(!o.screech && Math.abs(o.x - player.x) < 1500){ o.screech = true; sfx(1300, .55, 'sawtooth', -500, .03); noise(.55, .05, 3200, 6, 'bandpass', -900); }
         }
         if(o.ang >= Math.PI/2) o.phase = 2;
       } else { o.y += (o.tv || 150)*dt; if(o.y > (o.spot.kind === 'drive' ? 640 : 1300)) o.dead = true; }
@@ -996,7 +1092,7 @@ function update(dt){
         continue;
       }
       for(const c of obs){ if(c !== o && (c.type==='road' || c.type==='turn' || c.type==='pull') && !(o.blind && (c.type !== 'road' || c.wrecked || c.skid)) && Math.abs(c.y - o.y) < 40 && c.x > o.x && c.x - o.x < (c.w+o.w)/2 + 30) o.vx = Math.min(o.vx, c.vx); }
-      if(!o.honked && o.behind && o.x > player.x - 200){ o.honked = true; if(Math.abs(o.y - player.y) < 60) sfx(330, .25, 'sawtooth', 0, .04); }
+      if(!o.honked && o.behind && o.x > player.x - 200){ o.honked = true; if(Math.abs(o.y - player.y) < 60){ sfx(330, .3, 'sawtooth', 0, .03); sfx(415, .3, 'sawtooth', 0, .03); } }
     }
   }
   obsCrashes();
@@ -1022,13 +1118,13 @@ function update(dt){
     if(p.type === 'star'){
       if(!p.got && Math.abs(p.x - player.x) < 32 && Math.abs(p.y - player.y) < 26 && player.z < 50){
         p.got = true; player.starT = 5; player.hp = Math.max(player.hp, 60);
-        text(p.x, p.y, 'UNSTOPPABLE!', '#ffcc1a', 3.4); sfx(520, .1, 'square', 0, .06); setTimeout(() => sfx(780, .1, 'square', 0, .06), 90); setTimeout(() => sfx(1040, .25, 'square', 0, .06), 180);
+        text(p.x, p.y, 'UNSTOPPABLE!', '#ffcc1a', 3.4); SND.star();
       }
       continue;
     }
     for(const r of racers){
       if(r.wipe > 0 || r.z > 6 || Math.abs(p.x - r.x) > 60 || Math.abs(p.y - r.y) > 34) continue;
-      if(r.isPlayer && !(r.boostT > 1.3)){ text(p.x, p.y, 'BOOST!', '#8ef0b0'); sfx(660, .12, 'triangle', 500, .06); }
+      if(r.isPlayer && !(r.boostT > 1.3)){ text(p.x, p.y, 'BOOST!', '#8ef0b0'); SND.boost(); }
       r.boostT = 1.6;
     }
   }
@@ -1196,7 +1292,7 @@ function drawHUD(){
 
   ctx.fillStyle = 'rgba(10,12,16,.72)'; rr(W - 160, 8, 150, 52, 8);
   ctx.font = '700 12px ' + getFont('body'); ctx.fillStyle = '#a3a7b3'; ctx.fillText('TIME', W - 148, 26);
-  ctx.font = '22px ' + getFont('display'); ctx.fillStyle = '#f3efe4'; ctx.fillText(fmtTime(raceT), W - 148, 51);
+  ctx.font = '22px ' + getFont('display'); ctx.fillStyle = '#f3efe4'; ctx.fillText(fmtTime(player.finished ? player.ftime : raceT), W - 148, 51);
   if(isTouch){ const b = pauseBox(); ctx.fillStyle = 'rgba(10,12,16,.72)'; rr(b.x, b.y, b.w, b.h, 8); ctx.fillStyle = '#f3efe4'; ctx.fillRect(b.x + 17, b.y + 15, 6, 22); ctx.fillRect(b.x + 29, b.y + 15, 6, 22); }
 
   if(player.starT > 0) bar(22, 452, 170, 12, player.starT/5, '#ffcc1a', 'UNSTOPPABLE');
@@ -1272,7 +1368,7 @@ function render(dt){
   renderer.render(scene, camera);
   ctx.setTransform(K, 0, 0, K, 0, 0);
   ctx.clearRect(0, 0, W, H);
-  if(mode === 'title'){ drawTitle(); return; }
+  if(mode === 'title'){ drawTitle(); if(isTouch) drawMuteChip(); return; }
   drawWorldLabels();
   drawHUD();
   if(mode === 'countdown'){
@@ -1284,6 +1380,7 @@ function render(dt){
   } else if(mode === 'paused'){
     dim(.55); centerText('PAUSED', 260, 56, '#f3efe4'); centerText(isTouch ? 'Tap to resume' : 'Press P to resume', 300, 16, '#c9ccd4', 'body');
   } else if(mode === 'finish') drawFinish();
+  if(isTouch) drawMuteChip();
 }
 
 // ---------- input ----------
@@ -1291,7 +1388,7 @@ let isTouch = false;
 function startRace(){ initAudio(); reset(); mode = 'countdown'; }
 function onPress(k){
   initAudio();
-  if(k === 'mute'){ muted = !muted; return; }
+  if(k === 'mute'){ setMuted(!muted); return; }
   if(k === 'camera'){ camMode = (camMode + 1) % 2; return; }
   if(mode === 'title' || mode === 'finish'){ if(k === 'jump' || k === 'enter' || k === 'tap') startRace(); return; }
   if(k === 'pause'){ if(mode === 'paused') mode = prevMode; else if(mode === 'race' || mode === 'countdown'){ prevMode = mode; mode = 'paused'; } return; }
@@ -1316,7 +1413,18 @@ if(matchMedia('(pointer: coarse)').matches) enableTouch();
 addEventListener('touchstart', enableTouch, { passive:true });
 // Touch gestures, anywhere on screen: drag left/right and the bike follows your finger,
 // tap or swipe up to jump, tap the II chip to pause. A second finger can tap to jump while the first steers.
+function drawMuteChip(){
+  const b = muteBox(), cx = b.x + 18, cy = b.y + 26;
+  ctx.fillStyle = 'rgba(10,12,16,.72)'; rr(b.x, b.y, b.w, b.h, 8);
+  ctx.fillStyle = '#f3efe4'; ctx.beginPath(); ctx.moveTo(cx - 8, cy - 5); ctx.lineTo(cx - 2, cy - 5); ctx.lineTo(cx + 6, cy - 12); ctx.lineTo(cx + 6, cy + 12); ctx.lineTo(cx - 2, cy + 5); ctx.lineTo(cx - 8, cy + 5); ctx.closePath(); ctx.fill();
+  ctx.strokeStyle = muted ? '#ff4d3d' : '#f3efe4'; ctx.lineWidth = 3; ctx.lineCap = 'round'; ctx.beginPath();
+  if(muted){ ctx.moveTo(cx + 12, cy - 7); ctx.lineTo(cx + 24, cy + 7); ctx.moveTo(cx + 24, cy - 7); ctx.lineTo(cx + 12, cy + 7); }
+  else { ctx.arc(cx + 8, cy, 8, -.8, .8); ctx.moveTo(cx + 8 + 14*Math.cos(-.8), cy + 14*Math.sin(-.8)); ctx.arc(cx + 8, cy, 14, -.8, .8); }
+  ctx.stroke(); ctx.lineCap = 'butt';
+}
 function pauseBox(){ return { x: W - 222, y: 8, w: 52, h: 52 }; }
+function muteBox(){ return { x: W - 284, y: 8, w: 52, h: 52 }; }
+function hit(q, b){ return q.x >= b.x - 6 && q.x <= b.x + b.w + 6 && q.y >= b.y - 6 && q.y <= b.y + b.h + 6; }
 function toHud(e){ const r = hud.getBoundingClientRect(); return { x: (e.clientX - r.left) / r.width * W, y: (e.clientY - r.top) / r.height * H }; }
 const touches = new Map();
 let steerId = null, touchY = null;
@@ -1329,9 +1437,10 @@ function pxPerUnit(){
 stage.addEventListener('pointerdown', e => {
   e.preventDefault(); initAudio();
   try{ stage.setPointerCapture(e.pointerId); }catch(err){}
+  const q = toHud(e);
+  if(isTouch && hit(q, muteBox())){ onPress('mute'); return; }
   if(mode !== 'race' && mode !== 'countdown'){ onPress('tap'); return; }
-  const q = toHud(e), b = pauseBox();
-  if(isTouch && q.x >= b.x - 10 && q.x <= b.x + b.w + 10 && q.y <= b.y + b.h + 10){ onPress('pause'); return; }
+  if(isTouch && hit(q, pauseBox())){ onPress('pause'); return; }
   touches.set(e.pointerId, { x0: e.clientX, y0: e.clientY, t0: performance.now(), moved: false, jumped: false });
 });
 stage.addEventListener('pointermove', e => {
