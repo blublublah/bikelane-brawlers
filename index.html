@@ -153,6 +153,19 @@ function noise(d=.25, vol=.12, freq=900, q=.8, type='lowpass', sweep=0){
   g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(.0001, t + d);
   src.connect(f).connect(g).connect(sfxBus); src.start(t, Math.random()*.5); src.stop(t + d + .02);
 }
+// car horn: two notes a third apart through a body filter, with a punchy on/off envelope, so it reads as a solid BEEP
+function horn(d=.16, vol=.06, delay=0){
+  if(!AC) return;
+  const t = AC.currentTime + delay, f = AC.createBiquadFilter(), body = AC.createBiquadFilter(), g = AC.createGain();
+  f.type = 'lowpass'; f.frequency.value = 1500; f.Q.value = .7;
+  body.type = 'peaking'; body.frequency.value = 520; body.gain.value = 8; body.Q.value = 1.2;
+  g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(vol, t + .012); g.gain.setValueAtTime(vol, t + d - .03); g.gain.linearRampToValueAtTime(0, t + d);
+  for(const [hzv, type, lvl] of [[370, 'square', 1], [466, 'square', .9], [185, 'triangle', .8]]){
+    const o = AC.createOscillator(), og = AC.createGain(); o.type = type; o.frequency.value = hzv; og.gain.value = lvl;
+    o.connect(og).connect(f); o.start(t); o.stop(t + d + .02);
+  }
+  f.connect(body).connect(g).connect(sfxBus);
+}
 const SND = {
   jump(){ sfx(330, .18, 'triangle', 400, .05); noise(.2, .05, 1800, 1, 'bandpass', 1500); },
   land(){ sfx(90, .08, 'triangle', 0, .06); noise(.09, .06, 500); },
@@ -162,7 +175,7 @@ const SND = {
   bonk(){ noise(.3, .16, 900, .9, 'lowpass', -600); sfx(110, .25, 'square', -60, .06); },
   boost(){ sfx(520, .25, 'triangle', 700, .05); noise(.5, .08, 600, 1.4, 'bandpass', 3000); },
   star(){ [523, 659, 784, 1047].forEach((f, i) => setTimeout(() => sfx(f, .18, 'triangle', 0, .06), i*80)); },
-  honk2(vol=.035){ for(const t of [0, 170]) setTimeout(() => { sfx(392, .11, 'sawtooth', 0, vol); sfx(494, .11, 'sawtooth', 0, vol); }, t); },
+  honk2(vol=.06){ horn(.15, vol, 0); horn(.15, vol, .22); },
   dozerHorn(){ for(const t of [0, 420]) setTimeout(() => { sfx(98, .35, 'sawtooth', 0, .07); sfx(147, .35, 'square', 0, .04); }, t); },
   finish(){ [523, 659, 784].forEach((f, i) => setTimeout(() => sfx(f, .2, 'triangle', 0, .07), i*120)); setTimeout(() => { sfx(1047, .7, 'triangle', 0, .07); sfx(784, .7, 'sine', 0, .05); }, 380); },
 };
@@ -777,7 +790,7 @@ function spawnBus(){
 function tootBeforeTurn(o){
   const d = Math.abs(o.x - player.x);
   if(d > 1800) return;
-  SND.honk2(.04 * (1 - d/2200));
+  SND.honk2(.07 * (1 - d/2200));
   text(o.x, o.y, 'HONK HONK!', '#ffd27a', 2.2);
 }
 // when the street jams with crashed or stuck cars, a bulldozer comes through from behind and shoves it all aside
@@ -1241,7 +1254,7 @@ function update(dt){
         continue;
       }
       for(const c of obs){ if(c !== o && (c.type==='road' || c.type==='turn' || c.type==='pull' || c.type==='bus') && !(o.blind && (c.type !== 'road' || c.wrecked || c.skid)) && Math.abs(c.y - o.y) < 40 && c.x > o.x && c.x - o.x < (c.w+o.w)/2 + 30) o.vx = Math.min(o.vx, c.vx); }
-      if(!o.honked && o.behind && o.x > player.x - 200){ o.honked = true; if(Math.abs(o.y - player.y) < 60){ sfx(330, .3, 'sawtooth', 0, .03); sfx(415, .3, 'sawtooth', 0, .03); } }
+      if(!o.honked && o.behind && o.x > player.x - 200){ o.honked = true; if(Math.abs(o.y - player.y) < 60) horn(.4, .06); }
     }
   }
   obsCrashes();

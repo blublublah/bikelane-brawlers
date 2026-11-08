@@ -1,5 +1,5 @@
 // Bump VERSION on every deploy. Changing this file is what tells installed apps there's an update.
-const VERSION = 'v5';
+const VERSION = 'v6';
 const CACHE = 'bikelane-brawlers-' + VERSION;
 const FILES = [
   './',
