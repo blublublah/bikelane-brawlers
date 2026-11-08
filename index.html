@@ -920,7 +920,7 @@ function update(dt){
   if(player.finished) raceT = player.ftime;
 
   const ctrl = !player.finished && player.wipe <= 0;
-  player.steer = ctrl ? ((keys.right?1:0) - (keys.left?1:0)) : 0;
+  player.steer = !ctrl ? 0 : touchY !== null ? clamp((touchY - player.y)/10, -1, 1) : ((keys.right?1:0) - (keys.left?1:0));
   player.boosting = false;
   player.braking = false;
 
@@ -1314,39 +1314,46 @@ addEventListener('blur', () => { for(const k in keys) keys[k] = false; if(mode =
 function enableTouch(){ if(isTouch) return; isTouch = true; document.body.classList.add('touch'); fit(); }
 if(matchMedia('(pointer: coarse)').matches) enableTouch();
 addEventListener('touchstart', enableTouch, { passive:true });
-// Touch gestures, anywhere on screen: drag left/right to steer (hold the drag to keep turning),
+// Touch gestures, anywhere on screen: drag left/right and the bike follows your finger,
 // tap or swipe up to jump, tap the II chip to pause. A second finger can tap to jump while the first steers.
 function pauseBox(){ return { x: W - 222, y: 8, w: 52, h: 52 }; }
 function toHud(e){ const r = hud.getBoundingClientRect(); return { x: (e.clientX - r.left) / r.width * W, y: (e.clientY - r.top) / r.height * H }; }
 const touches = new Map();
-let steerId = null;
-const DEAD = 10, SLACK = 22, SWIPE = 36;
-function setSteer(d){ keys.left = d < 0; keys.right = d > 0; }
+let steerId = null, touchY = null;
+const DEAD = 10, SWIPE = 36;
+// screen pixels per unit of sideways movement at the player's spot on the road, so the bike tracks the finger 1:1
+function pxPerUnit(){
+  const a = proj(player.x, player.y - 20, 0), b = proj(player.x, player.y + 20, 0);
+  return Math.max(.5, Math.abs(b.x - a.x) / 40 * hudW / W);
+}
 stage.addEventListener('pointerdown', e => {
   e.preventDefault(); initAudio();
   try{ stage.setPointerCapture(e.pointerId); }catch(err){}
   if(mode !== 'race' && mode !== 'countdown'){ onPress('tap'); return; }
   const q = toHud(e), b = pauseBox();
   if(isTouch && q.x >= b.x - 10 && q.x <= b.x + b.w + 10 && q.y <= b.y + b.h + 10){ onPress('pause'); return; }
-  touches.set(e.pointerId, { x0: e.clientX, y0: e.clientY, anchor: e.clientX, t0: performance.now(), moved: false, jumped: false });
+  touches.set(e.pointerId, { x0: e.clientX, y0: e.clientY, t0: performance.now(), moved: false, jumped: false });
 });
 stage.addEventListener('pointermove', e => {
   const t = touches.get(e.pointerId); if(!t) return;
   const dx = e.clientX - t.x0, dy = e.clientY - t.y0;
   if(Math.hypot(dx, dy) > DEAD) t.moved = true;
   if(!t.jumped && dy < -SWIPE && -dy > Math.abs(dx) && performance.now() - t.t0 < 500){ t.jumped = true; onPress('jump'); }
-  if(steerId === null && Math.abs(dx) > DEAD && Math.abs(dx) > Math.abs(dy) * .7) steerId = e.pointerId;
+  if(steerId === null && Math.abs(dx) > DEAD && Math.abs(dx) > Math.abs(dy) * .7){
+    steerId = e.pointerId; t.baseX = t.x0; t.baseY = player.y; t.ppu = pxPerUnit();
+  }
   if(steerId !== e.pointerId) return;
-  // anchor trails the finger, so reversing direction takes effect after a short move back
-  if(e.clientX - t.anchor > SLACK) t.anchor = e.clientX - SLACK;
-  if(t.anchor - e.clientX > SLACK) t.anchor = e.clientX + SLACK;
-  const off = e.clientX - t.anchor;
-  setSteer(off > DEAD / 2 ? 1 : off < -DEAD / 2 ? -1 : 0);
+  // the bike follows the finger: drag 1cm across the screen and it moves 1cm across the road
+  let y = t.baseY + (e.clientX - t.baseX) / t.ppu;
+  // past the edge of the street, re-anchor so dragging back responds straight away
+  if(y > YMAX){ t.baseX += (y - YMAX) * t.ppu; y = YMAX; }
+  if(y < YMIN){ t.baseX -= (YMIN - y) * t.ppu; y = YMIN; }
+  touchY = y;
 });
 const endTouch = e => {
   const t = touches.get(e.pointerId); if(!t) return;
   touches.delete(e.pointerId);
-  if(steerId === e.pointerId){ steerId = null; setSteer(0); }
+  if(steerId === e.pointerId){ steerId = null; touchY = null; }
   if(e.type === 'pointerup' && !t.moved && !t.jumped && performance.now() - t.t0 < 300) onPress('jump');
 };
 stage.addEventListener('pointerup', endTouch);
