@@ -162,6 +162,8 @@ const SND = {
   bonk(){ noise(.3, .16, 900, .9, 'lowpass', -600); sfx(110, .25, 'square', -60, .06); },
   boost(){ sfx(520, .25, 'triangle', 700, .05); noise(.5, .08, 600, 1.4, 'bandpass', 3000); },
   star(){ [523, 659, 784, 1047].forEach((f, i) => setTimeout(() => sfx(f, .18, 'triangle', 0, .06), i*80)); },
+  honk2(vol=.035){ for(const t of [0, 170]) setTimeout(() => { sfx(392, .11, 'sawtooth', 0, vol); sfx(494, .11, 'sawtooth', 0, vol); }, t); },
+  dozerHorn(){ for(const t of [0, 420]) setTimeout(() => { sfx(98, .35, 'sawtooth', 0, .07); sfx(147, .35, 'square', 0, .04); }, t); },
   finish(){ [523, 659, 784].forEach((f, i) => setTimeout(() => sfx(f, .2, 'triangle', 0, .07), i*120)); setTimeout(() => { sfx(1047, .7, 'triangle', 0, .07); sfx(784, .7, 'sine', 0, .05); }, 380); },
 };
 
@@ -518,6 +520,65 @@ function makeMobility(o){
   o.flag = add(g, box(.02,.28,.45), mat('#ff7a1a', true), -.38, 2.25, .82, 0,0,0, false);
   return g;
 }
+// city bus: long, flat-roofed, rides like the delivery trucks once you're up there
+let busSignTex = null, busPaintTex = null;
+function makeBus(o){
+  const L = o.w*S, Wd = o.h*S, g = new T.Group();
+  const body = mat('#2f7fd0'), glass = mat('#1d2633'), tire = mat('#141414'), white = mat('#eef1f4');
+  add(g, box(Wd, 2.1, L), body, 0, 1.25, 0);
+  add(g, box(Wd + .02, .5, L*.98), white, 0, .55, 0);               // white skirt
+  add(g, box(Wd + .03, .75, L*.82), glass, 0, 1.75, L*.06);          // side window band
+  add(g, box(Wd*.92, 1.2, .06), glass, 0, 1.6, -L/2 - .02);          // windscreen
+  add(g, box(Wd*.94, .05, L*.99), mat('#d7dde3'), 0, 2.31, 0, 0,0,0, false); // roof
+  add(g, box(.06, 1.7, .9), mat('#9fb7c9'), Wd/2 + .02, 1.15, -L*.4);  // front door (curb side)
+  add(g, box(.06, 1.7, .9), mat('#9fb7c9'), Wd/2 + .02, 1.15, L*.05);  // middle door
+  if(!busSignTex) busSignTex = canvasTex(256, 48, (c, w, h) => { c.fillStyle = '#111'; c.fillRect(0, 0, w, h); c.fillStyle = '#ffb21a'; c.font = '30px Bungee, Impact, sans-serif'; c.textAlign = 'center'; c.fillText('12  DOWNTOWN', w/2, 36); });
+  const sign = new T.Mesh(new T.PlaneGeometry(Wd*.8, .26), new T.MeshBasicMaterial({ map: busSignTex }));
+  sign.position.set(0, 2.08, -L/2 - .05); sign.rotation.y = Math.PI; g.add(sign);
+  for(const sx of [-1,1]) for(const sz of [-.33, .3]) add(g, cyl(.48,.48,.32,14), tire, sx*(Wd/2 - .1), .48, sz*L, 0, 0, Math.PI/2);
+  add(g, box(.42,.16,.05), mat('#fff2b8', true), -Wd*.32, .7, -L/2 - .01, 0,0,0, false); add(g, box(.42,.16,.05), mat('#fff2b8', true), Wd*.32, .7, -L/2 - .01, 0,0,0, false);
+  add(g, box(.36,.2,.05), mat('#e8322e', true), -Wd*.34, .8, L/2 + .01, 0,0,0, false); add(g, box(.36,.2,.05), mat('#e8322e', true), Wd*.34, .8, L/2 + .01, 0,0,0, false);
+  o.blinkers = [add(g, box(.2,.16,.2), mat('#ffa31a', true), Wd/2 - .05, .86, -L/2 + .05, 0,0,0,false), add(g, box(.2,.16,.2), mat('#ffa31a', true), Wd/2 - .05, .86, L/2 - .05, 0,0,0,false)];
+  return g;
+}
+// the bulldozer: sent in when the street jams up. Nothing can move it.
+function makeDozer(o){
+  const L = o.w*S, Wd = o.h*S, g = new T.Group(), y = mat('#f2b705'), dark = mat('#2a2a2a'), steel = mat('#8f979e');
+  for(const sx of [-1, 1]) add(g, box(.9, 1.1, L*.7), dark, sx*(Wd/2 - .55), .55, L*.1);
+  add(g, box(Wd - 1.2, 1.3, L*.6), y, 0, 1.4, L*.12);
+  add(g, box(Wd*.55, 1.5, L*.32), y, 0, 2.75, L*.2);
+  add(g, box(Wd*.5, .9, .06), mat('#1d2633'), 0, 2.9, L*.04 - .02);
+  add(g, box(Wd + .4, 1.9, .3), steel, 0, 1, -L/2 + .1);                   // blade
+  add(g, box(Wd + .45, .2, .5), mat('#cfd5da'), 0, .12, -L/2 + .05);
+  for(const sx of [-1, 1]) add(g, box(.25, .25, L*.35), y, sx*Wd*.3, 1.2, -L*.28);  // push arms
+  o.beacon = add(g, cyl(.16, .16, .25, 10), mat('#ff8a00', true), 0, 3.65, L*.2, 0,0,0, false);
+  add(g, box(.12, 1.1, .12), dark, Wd*.18, 2.6, L*.42);                    // exhaust stack
+  return g;
+}
+// bus stop on the sidewalk: shelter, sign, BUS STOP painted in the lane, and a few people waiting
+function makeStop(st){
+  const g = new T.Group(), post = mat('#3a3f4b'), pane = new T.MeshLambertMaterial({ color: '#bfe3f2', transparent: true, opacity: .45 });
+  const sx = (st.shelterY - st.y) * S; // shelter sits back on the sidewalk
+  for(const z of [-1.6, 1.6]) for(const x of [-.6, .6]) add(g, box(.08, 2.3, .08), post, sx + x, 1.15, z);
+  add(g, box(1.5, .1, 3.6), mat('#2f7fd0'), sx, 2.33, 0);
+  add(g, box(.05, 1.8, 3.2), pane, sx + .6, 1.2, 0, 0,0,0, false);
+  add(g, box(.5, .08, 2.6), mat('#8a6a4a'), sx + .25, .5, 0);
+  add(g, cyl(.05,.05,2.8,8), post, sx - 1, 1.4, -2.4);
+  const disc = add(g, cyl(.32,.32,.05,18), mat('#2f7fd0', true), sx - 1, 2.75, -2.4, Math.PI/2, 0, 0, false);
+  if(!busPaintTex) busPaintTex = canvasTex(128, 512, (c, w, h) => { c.clearRect(0, 0, w, h); c.save(); c.translate(w/2, h/2); c.rotate(-Math.PI/2); c.fillStyle = 'rgba(255,255,255,.85)'; c.font = '64px Bungee, Impact, sans-serif'; c.textAlign = 'center'; c.fillText('BUS STOP', 0, 22); c.restore(); });
+  const paint = new T.Mesh(new T.PlaneGeometry(1.6, 6.4), new T.MeshBasicMaterial({ map: busPaintTex, transparent: true, depthWrite: false }));
+  paint.rotation.x = -Math.PI/2; paint.position.set((st.laneY - st.y)*S, .035, 0); g.add(paint);
+  st.people = [];
+  const shirts = ['#e05d5d','#5d8de0','#e0b25d','#6bbf8a','#b07ae0','#e8e3d8'];
+  for(let i = 0; i < st.n; i++){
+    const pg = new T.Group();
+    add(pg, box(.22,.7,.2), mat('#2b2f3a'), 0, .35, 0);
+    makeRider(pg, pick(shirts), .65, Math.random() < .5 ? mat(pick(['#3b2a1d','#c9a36b','#1b1b1b','#8a8a8a'])) : null);
+    g.add(pg);
+    st.people.push({ mesh: pg, x: rand(-60, 60), y: st.shelterY + rand(-28, 20), done: false });
+  }
+  return g;
+}
 function makePothole(){
   const g = new T.Group();
   const rim = new T.Mesh(new T.CircleGeometry(.85, 18), mat('#4a4a46')); rim.rotation.x = -Math.PI/2; rim.position.y = .015; rim.scale.set(1, .7, 1); rim.receiveShadow = true; g.add(rim);
@@ -612,7 +673,7 @@ function makeRacer(r){
 // =====================================================================
 let mode = 'title'; // title | countdown | race | finish | paused
 let prevMode = 'race';
-let racers = [], player, obs = [], pickups = [], oncoming = [], fx = [], parts = [];
+let racers = [], player, obs = [], pickups = [], oncoming = [], fx = [], parts = [], stops = [], busT = 8;
 let camX = 0, raceT = 0, countT = 0, nextSpawn = 0, roadT = 0, oncT = 0, finishCount = 0, finishDelay = 0, shake = 0, titleT = 0, mopedT = 0;
 let camMode = 0; // 0 chase, 1 high
 let best = parseFloat(lsGet('bb3d_best')) || 0;
@@ -628,7 +689,7 @@ function mkRacer(name, color, isPlayer, y, cruise, skill){
 
 function drop(o){ if(o.mesh) scene.remove(o.mesh); }
 function reset(){
-  racers.forEach(drop); obs.forEach(drop); pickups.forEach(drop); oncoming.forEach(drop);
+  racers.forEach(drop); obs.forEach(drop); pickups.forEach(drop); oncoming.forEach(drop); stops.forEach(drop);
   racers = [
     mkRacer('Kickstand Kat', '#ff5fa2', false, 300, 352, .86),
     mkRacer('Dex Rally', '#4fc3ff', false, 330, 360, .9),
@@ -637,14 +698,16 @@ function reset(){
   ];
   player = racers[2];
   racers.forEach((r,i)=>{ r.x = -i*6; });
-  obs = []; pickups = []; oncoming = []; fx = []; parts = [];
+  obs = []; pickups = []; oncoming = []; fx = []; parts = []; stops = []; busT = rand(6, 9);
   camX = player.x - SCREEN_X; raceT = 0; countT = 3.2; nextSpawn = 900; roadT = 1.5; oncT = .3; mopedT = rand(4, 6);
-  finishCount = 0; finishDelay = 0; shake = 0;
+  finishCount = 0; finishDelay = 0; shake = 0; dozerT = 0;
   spots.forEach(sp => sp.used = false); cam.init = false;
 }
 
 function addObs(o){
   if(o.type==='car'||o.type==='van'||o.type==='road'||o.type==='turn'||o.type==='pull') o.mesh = makeCar(o);
+  else if(o.type==='bus') o.mesh = makeBus(o);
+  else if(o.type==='dozer') o.mesh = makeDozer(o);
   else if(o.type==='moped') o.mesh = makeMoped(o);
   else if(o.type==='mobility') o.mesh = makeMobility(o);
   else if(o.type==='pothole') o.mesh = makePothole();
@@ -679,7 +742,7 @@ function spawnRoadCar(){
   const behind = v > player.speed + 40 && mode === 'race';
   const x = behind ? player.x - 520 : player.x + 2900;
   const y = rand(190, 232);
-  if(obs.some(o => (o.type==='road' || o.type==='turn' || o.type==='pull') && Math.abs(o.y - y) < 60 && Math.abs(o.x - x) < 230)) return;
+  if(obs.some(o => (o.type==='road' || o.type==='turn' || o.type==='pull' || o.type==='bus') && Math.abs(o.y - y) < 60 && Math.abs(o.x - x) < 230)) return;
   const turnSpot = Math.random() < .35 ? spots.find(sp => sp.x - TURN_R > x + 600) : null;
   addObs({ type:'road', turnSpot, x, y, w: Math.random()<.2?130:98, h:48, vx:v, vmax:v, blind: Math.random() < .35, color: pick(CAR_COLORS), honked:false, behind });
 }
@@ -698,6 +761,42 @@ function spawnPuller(spot){
   const wait = rand(0, 9); // the driver leaves whenever they like
   addObs({ type:'pull', x: spot.x, y: y0, w:98, h:48, L:98, Wd:48, vx:0, a:-Math.PI/2, phase:-1, wait, hold:.5, spot, color: pick(CAR_COLORS) });
 }
+// a bus pulls out of traffic, across into the bike lane at a stop ahead, picks people up and pulls out again
+const BUS_ROAD_Y = 212, BUS_LANE_Y = 384, BUS_IN = 650, BUS_OUT = 520;
+function spawnBus(){
+  let stopX = 0;
+  for(let x = player.x + 2800; x < player.x + 3800; x += 60) if(!nearSpot(x*S, 7) && !nearSpot((x - BUS_IN/2)*S, 4)){ stopX = x; break; }
+  if(!stopX || stopX > FINISH - 900) return false;
+  for(const o of obs) if((o.type === 'road' || o.type === 'bus') && Math.abs(o.x - (stopX - BUS_IN)) < 500) o.dead = o.type === 'road';
+  const st = { x: stopX, y: BUS_LANE_Y, laneY: BUS_LANE_Y, shelterY: 470, n: 2 + (Math.random()*3|0) };
+  st.mesh = makeStop(st); scene.add(st.mesh); stops.push(st);
+  addObs({ type:'bus', x: stopX - BUS_IN, y: BUS_ROAD_Y, w: 240, h: 50, vx: 260, vy: 0, a: 0, phase: 1, stopX, st, dwell: 0 });
+  return true;
+}
+// a car about to turn off the road gives two quick toots first
+function tootBeforeTurn(o){
+  const d = Math.abs(o.x - player.x);
+  if(d > 1800) return;
+  SND.honk2(.04 * (1 - d/2200));
+  text(o.x, o.y, 'HONK HONK!', '#ffd27a', 2.2);
+}
+// when the street jams with crashed or stuck cars, a bulldozer comes through from behind and shoves it all aside
+let dozerT = 0;
+function jammed(c){ return HEAVY[c.type] && !c.fly && !c.dead && (c.wrecked || c.skid || (c.type === 'road' && c.vx < 25)); }
+function checkPileup(dt){
+  dozerT -= dt;
+  if(dozerT > 0 || mode !== 'race' || player.x > FINISH - 1500 || obs.some(o => o.type === 'dozer')) return;
+  const js = obs.filter(c => jammed(c) && c.x > player.x - 200 && c.x < player.x + 1800);
+  for(const c of js){
+    const near = js.filter(d => Math.abs(d.x - c.x) < 360 && Math.abs(d.y - c.y) < 140);
+    if(near.length >= 4){
+      const y = clamp(near.reduce((a, d) => a + d.y, 0) / near.length, 130, 380);
+      addObs({ type:'dozer', x: player.x - 1100, y, w: 150, h: 96, vx: 1050 });
+      SND.dozerHorn(); dozerT = 12;
+      return;
+    }
+  }
+}
 // delivery mopeds now come up from behind at high speed, holding one line through the bike lane
 function spawnMoped(){
   const y = clamp(player.y + rand(-25, 25), 296, 396);
@@ -710,7 +809,7 @@ function spawnOncoming(){
 
 // ---------- actions ----------
 const ROOF_Z = 64; // delivery truck roof (2.3 m) in jump units
-const roofOf = o => o.type === 'van' ? ROOF_Z : 45; // parked car roof is about 1.6 m
+const roofOf = o => o.type === 'van' || o.type === 'bus' ? ROOF_Z : 45; // parked car roof is about 1.6 m
 function jump(r){
   if(r.vz !== 0 || (r.z > 0 && !r.onVan) || r.jcd > 0 || r.wipe > 0) return;
   r.onVan = null;
@@ -757,6 +856,8 @@ const HIT = {
   van:     { dmg:38, keep:.15, zMax:36, msg:['DELIVERY DENIED!','BONK!'] },
   pull:    { dmg:40, keep:.25, zMax:34, msg:['THEY PULLED OUT!','LOOK BOTH WAYS!','HONK!'] },
   turn:    { dmg:40, keep:.25, zMax:34, msg:['RIGHT HOOK!','LOOK BEFORE YOU TURN!','USE YOUR MIRRORS!'] },
+  dozer:   { dmg:30, keep:.5,  zMax:58, msg:['BULLDOZED!','FLATTENED!','OUT OF THE WAY!'] },
+  bus:     { dmg:40, keep:.2,  zMax:36, msg:['MIND THE BUS!','DING DING!','NEXT STOP: PAIN!'] },
   road:    { dmg:42, keep:.35, zMax:34, msg:['STAY IN YOUR LANE!','HONK HONK!'] },
   moped:   { dmg:22, keep:.5,  zMax:22, msg:['WATCH IT!','MY NOODLES!','OI!','ON YOUR LEFT!'] },
   mobility:{ dmg:16, keep:.45, zMax:20, msg:["SORRY, MA'AM!",'SORRY, SIR!','MANNERS!'] },
@@ -862,6 +963,7 @@ function obsCrashes(){
 }
 
 function collide(r, o){
+  if(o.type === 'dozer' && r.starT > 0){ r.kvy = (Math.sign(r.y - o.y) || 1) * 600; r.inv = .5; return; } // even Unstoppable can't move it
   if(r.starT > 0){
     const side = Math.sign(o.y - r.y) || 1;
     launch(o, Math.max(r.speed*2.4, o.vx*1.3) + 600, side*rand(350, 750), rand(1150, 1500));
@@ -885,7 +987,8 @@ function collide(r, o){
   if(o.type==='cone'){ o.dead = true; burst(o.x, o.y, .4, '#ff6a13', 8); }
   // light things you hit go flying; fast things that hit you send you flying
   if(LIGHT[o.type]) launch(o, Math.max(r.speed*1.8, o.vx) + 300, dir*-1*rand(250, 500), rand(850, 1150));
-  if((o.type==='road' || o.type==='turn' || o.type==='pull' || (o.type==='moped' && o.vx > r.speed)) && r.z < 5){
+  if(o.type==='dozer'){ r.kvy = (Math.sign(r.y - o.y) || 1) * 700; r.vz = 620; r.tumble = true; r.tspin = 0; r.onVan = null; }
+  else if((o.type==='road' || o.type==='turn' || o.type==='pull' || (o.type==='moped' && o.vx > r.speed)) && r.z < 5){
     r.vz = o.type === 'moped' ? 380 : 560; r.tumble = true; r.tspin = 0; r.onVan = null;
   }
   if(r.hp <= 0) wipeout(r);
@@ -970,20 +1073,23 @@ function updateRacer(r, dt){
   r.y += r.kvy * dt; r.kvy *= Math.pow(.015, dt);
   if(r.y < YMIN){ r.y = YMIN; r.kvy = 0; } if(r.y > YMAX){ r.y = YMAX; r.kvy = 0; }
   // delivery-truck roofs are something you can land on and ride across
-  if(r.onVan){ const o = r.onVan; if(o.dead || Math.abs(o.x - r.x) > o.w/2 + 6 || Math.abs(o.y - r.y) > o.h/2 + 6) r.onVan = null; }
+  if(r.onVan){ const o = r.onVan; if(o.dead || o.fly || Math.abs(o.x - r.x) > o.w/2 + 6 || Math.abs(o.y - r.y) > o.h/2 + 6) r.onVan = null; }
   if(r.z > (r.onVan ? roofOf(r.onVan) : 0) || r.vz > 0){
     r.vz -= 1400*dt; r.z += r.vz*dt;
     if(r.vz <= 0 && !r.onVan && r.wipe <= 0 && r.z > 36){
-      for(const o of obs) if((o.type === 'van' || o.type === 'car') && !o.dead && r.z <= roofOf(o) + 2 && r.z > roofOf(o) - 30 && Math.abs(o.x - r.x) < o.w/2 && Math.abs(o.y - r.y) < o.h/2 + 4){
+      for(const o of obs) if((o.type === 'van' || o.type === 'car' || o.type === 'bus') && !o.dead && !o.fly && r.z <= roofOf(o) + 2 && r.z > roofOf(o) - 30 && Math.abs(o.x - r.x) < o.w/2 && Math.abs(o.y - r.y) < o.h/2 + 4){
         r.onVan = o;
-        if(r.isPlayer && !o.roofed){ o.roofed = true; text(r.x + 30, r.y, pick(['ROOF RIDE!', o.type === 'van' ? 'ON THE TRUCK!' : 'CAR SURFING!','PARKOUR!']), '#8ef0b0', 4.2); }
+        if(r.isPlayer && !o.roofed){ o.roofed = true; text(r.x + 30, r.y, (o.type === 'bus' ? pick(['ON THE BUS!','FREE RIDE!','TOP DECK!']) : pick(['ROOF RIDE!', o.type === 'van' ? 'ON THE TRUCK!' : 'CAR SURFING!','PARKOUR!'])), '#8ef0b0', 4.2); }
         break;
       }
     }
     const g = r.onVan ? roofOf(r.onVan) : 0;
     if(r.z <= g){ r.z = g; r.vz = 0; if(r.isPlayer) SND.land(); }
   }
-  r.x += r.speed * dt;
+  // on a bus roof you travel with the bus and can walk forward along it
+  const ride = r.onVan && r.onVan.type === 'bus' && !r.onVan.fly ? r.onVan : null;
+  if(ride){ r.x += (ride.vx + r.speed*.15) * dt; r.y = clamp(r.y + ride.vy*dt, YMIN, YMAX); }
+  else r.x += r.speed * dt;
   if(!r.finished && r.x >= FINISH){
     // time the exact moment the line was crossed within this frame, so racers finishing together still get distinct times
     r.finished = true; r.ftime = raceT - (r.x - FINISH) / Math.max(1, r.speed); r.place = ++finishCount;
@@ -1041,6 +1147,7 @@ function update(dt){
   oncT -= dt; if(oncT <= 0){ spawnOncoming(); oncT = rand(.6, 1.6); }
   for(const sp of spots){ if(!sp.used && sp.x - TURN_R - player.x < 3000){ sp.used = true; if(Math.random() < .5) spawnPuller(sp); } }
   mopedT -= dt; if(mopedT <= 0 && player.x < FINISH - 600){ spawnMoped(); mopedT = rand(5, 9); }
+  busT -= dt; if(busT <= 0 && mode === 'race' && !obs.some(o => o.type === 'bus' && o.phase < 3)){ busT = spawnBus() ? rand(13, 20) : 1; }
 
   const t = performance.now()/1000;
   for(const o of obs){
@@ -1050,16 +1157,16 @@ function update(dt){
     o.x += o.vx * dt;
     if(o.type === 'moped'){
       // swerve around anything parked or slow ahead
-      if(!o.blind) for(const c of obs){ if(c !== o && (c.type==='car'||c.type==='van'||c.type==='mobility'||c.type==='pull'||c.wrecked) && !c.fly && c.x > o.x && c.x - o.x < 320 && Math.abs(c.y - o.by) < c.h/2 + 16){ o.by = clamp(o.by + (c.y > 345 ? -1 : 1)*320*dt, 296, 396); } }
+      if(!o.blind) for(const c of obs){ if(c !== o && (c.type==='car'||c.type==='van'||c.type==='bus'||c.type==='mobility'||c.type==='pull'||c.wrecked) && !c.fly && c.x > o.x && c.x - o.x < 320 && Math.abs(c.y - o.by) < c.h/2 + 16){ o.by = clamp(o.by + (c.y > 345 ? -1 : 1)*320*dt, 296, 396); } }
       const ny = o.by + Math.sin(t*2.2 + o.ph)*4;
       if(!o.warned && o.x < player.x && player.x - o.x < 650){ o.warned = true; sfx(880, .09, 'square', 0, .05); setTimeout(() => sfx(880, .09, 'square', 0, .05), 140); }
       o.yaw = (ny - o.y) / Math.max(1, o.vx*dt) * .6; o.y = ny;
     } else if(o.type === 'mobility'){
-      for(const c of obs){ if((c.type==='car'||c.type==='van') && c.x > o.x && c.x - o.x < 140 && Math.abs(c.y - o.y) < c.h/2 + 18){ o.y = Math.max(300, o.y - 40*dt); } }
+      for(const c of obs){ if((c.type==='car'||c.type==='van'||c.type==='bus') && c.x > o.x && c.x - o.x < 140 && Math.abs(c.y - o.y) < c.h/2 + 18){ o.y = Math.max(300, o.y - 40*dt); } }
       o.y += Math.sin(t*1.3 + o.ph)*6*dt;
     } else if(o.type === 'turn'){
       const Xs = o.spot.x - TURN_R;
-      if(o.phase === 0){ if(o.x >= Xs){ o.phase = 1; o.x = Xs; o.vx = 0; o.ang = 0; } }
+      if(o.phase === 0){ if(!o.tooted && o.x >= Xs - Math.max(o.vx, 120)*.7){ o.tooted = true; tootBeforeTurn(o); } if(o.x >= Xs){ o.phase = 1; o.x = Xs; o.vx = 0; o.ang = 0; } }
       else if(o.phase === 1){
         o.ang = Math.min(Math.PI/2, o.ang + (o.tv || 150)/TURN_R*dt);
         o.x = Xs + TURN_R*Math.sin(o.ang); o.y = (o.y0 ?? 210) + TURN_R*(1 - Math.cos(o.ang)); o.a = o.ang;
@@ -1083,19 +1190,62 @@ function update(dt){
       } else { o.vx = Math.min(560, o.vx + 260*dt); }
       const c = Math.abs(Math.cos(o.a)), sn = Math.abs(Math.sin(o.a));
       o.w = c*o.L + sn*o.Wd; o.h = sn*o.L + c*o.Wd;
+    } else if(o.type === 'dozer'){
+      // infinite mass: everything in the blade's path goes flying, the dozer never slows down
+      for(const c of obs){
+        if(c === o || c.fly || c.dead || c.type === 'pothole' || c.type === 'cone') continue;
+        if(Math.abs(c.x - o.x) > (c.w + o.w)/2 || Math.abs(c.y - o.y) > (c.h + o.h)/2) continue;
+        const side = Math.sign(c.y - o.y) || (Math.random() < .5 ? -1 : 1);
+        c.skid = false; c.parked = false; if(c.haz){ c.haz.forEach(m => m.visible = false); c.haz = null; }
+        launch(c, o.vx*rand(.9, 1.25), side*rand(250, 650), rand(900, 1400));
+        if(Math.abs(c.x - player.x) < 1500){ SND.crash(); shake = Math.max(shake, .25); }
+      }
+      if(o.beacon) o.beacon.visible = Math.floor(t*5) % 2 === 0;
+      if(o.x > player.x + 3500 || o.x > FINISH + 800) o.dead = true;
+    } else if(o.type === 'bus'){
+      const y0 = o.y, ease = u => u*u*(3 - 2*u);
+      if(o.phase === 1){ // indicate, slow down and swing across into the stop
+        const u = clamp(1 - (o.stopX - o.x) / BUS_IN, 0, 1);
+        o.vx = Math.max(35, 260*Math.sqrt(1 - u));
+        o.y = BUS_ROAD_Y + (BUS_LANE_Y - BUS_ROAD_Y)*ease(u);
+        if(o.x >= o.stopX){ o.x = o.stopX; o.vx = 0; o.y = BUS_LANE_Y; o.phase = 2; o.blinkers.forEach(m => m.visible = false); }
+      } else if(o.phase === 2){ // doors open; stays until you've had your chance, then leaves
+        o.dwell += dt;
+        const riding = racers.some(r => r.onVan === o);
+        if(riding) o.rideT = (o.rideT || 0) + dt;
+        if((o.dwell > 6 && player.x > o.stopX + 40 && !riding) || o.rideT > .8 || o.dwell > 16) o.phase = 3;
+      } else { // pull back out into traffic
+        o.vx = Math.min(520, o.vx + 140*dt);
+        const u = clamp((o.x - o.stopX) / BUS_OUT, 0, 1);
+        o.y = BUS_LANE_Y + (BUS_ROAD_Y - BUS_LANE_Y)*ease(u);
+        if(o.x > player.x + 3600) o.dead = true;
+      }
+      o.vy = dt > 0 ? (o.y - y0) / dt : 0;
+      o.a = o.vx > 5 ? Math.atan2(o.vy, o.vx) * .8 : 0;
+      // riders steer around nothing here: the people waiting walk to the door and get on
+      if(o.phase === 2 && o.st){
+        for(const p of o.st.people){
+          if(p.done) continue;
+          const tx = o.stopX + o.w*.4 - o.st.x, ty = BUS_LANE_Y + o.h/2 + 4, dx = tx - p.x, dy = ty - p.y, d = Math.hypot(dx, dy);
+          if(d < 6){ p.done = true; p.mesh.visible = false; continue; }
+          const v = 75*dt / d; p.x += dx*Math.min(1, v); p.y += dy*Math.min(1, v); p.walking = true;
+        }
+      }
     } else if(o.type === 'road'){
       if(o.vmax) o.vx = Math.min(o.vmax, o.vx + 300*dt);
       // a driver who decided to turn just takes the corner at speed, whoever is in the bike lane
+      if(o.turnSpot && !o.tooted && o.x >= o.turnSpot.x - TURN_R - o.vx*.7){ o.tooted = true; tootBeforeTurn(o); }
       if(o.turnSpot && o.x >= o.turnSpot.x - TURN_R){
         o.type = 'turn'; o.spot = o.turnSpot; o.tv = Math.max(o.vx, 250); o.vx = 0; o.x = o.spot.x - TURN_R;
         o.y0 = o.y; o.phase = 1; o.ang = 0; o.a = 0; o.L = o.w; o.Wd = o.h; o.vmax = 0;
         continue;
       }
-      for(const c of obs){ if(c !== o && (c.type==='road' || c.type==='turn' || c.type==='pull') && !(o.blind && (c.type !== 'road' || c.wrecked || c.skid)) && Math.abs(c.y - o.y) < 40 && c.x > o.x && c.x - o.x < (c.w+o.w)/2 + 30) o.vx = Math.min(o.vx, c.vx); }
+      for(const c of obs){ if(c !== o && (c.type==='road' || c.type==='turn' || c.type==='pull' || c.type==='bus') && !(o.blind && (c.type !== 'road' || c.wrecked || c.skid)) && Math.abs(c.y - o.y) < 40 && c.x > o.x && c.x - o.x < (c.w+o.w)/2 + 30) o.vx = Math.min(o.vx, c.vx); }
       if(!o.honked && o.behind && o.x > player.x - 200){ o.honked = true; if(Math.abs(o.y - player.y) < 60){ sfx(330, .3, 'sawtooth', 0, .03); sfx(415, .3, 'sawtooth', 0, .03); } }
     }
   }
   obsCrashes();
+  checkPileup(dt);
   for(const c of oncoming) c.x += c.vx*dt;
 
   for(const r of racers){
@@ -1104,7 +1254,7 @@ function update(dt){
       if(o.dead || o.fly || o === r.onVan) continue;
       if(Math.abs(o.x - r.x) >= o.w/2 + 20 || Math.abs(o.y - r.y) >= o.h/2 + 7) continue;
       if(r.z > HIT[o.type].zMax){
-        if(r.isPlayer && !o.cleared && (o.type==='car'||o.type==='van'||o.type==='road'||o.type==='turn'||o.type==='pull'||o.type==='moped'||o.type==='mobility')){
+        if(r.isPlayer && !o.cleared && (o.type==='car'||o.type==='van'||o.type==='bus'||o.type==='dozer'||o.type==='road'||o.type==='turn'||o.type==='pull'||o.type==='moped'||o.type==='mobility')){
           o.cleared = true; text(r.x + 40, r.y, pick(['AIR!','HOP!','SICK JUMP!']), '#8ef0b0', 3 + r.z*ZS);
         }
         continue;
@@ -1130,9 +1280,10 @@ function update(dt){
   }
 
   const minX = Math.min(player.x - 700, ...racers.map(r => r.x - 700));
-  obs = obs.filter(o => { const keep = !o.dead && (o.x > minX || (o.type === 'moped' && o.x > minX - 900)); if(!keep) drop(o); return keep; });
+  obs = obs.filter(o => { const keep = !o.dead && (o.x > minX || (o.type === 'moped' && o.x > minX - 900) || (o.type === 'dozer' && o.x > minX - 1200)); if(!keep) drop(o); return keep; });
   pickups = pickups.filter(p => { const keep = !p.got && p.x > Math.min(player.x - 400, ...racers.map(r => r.x - 400)); if(!keep) drop(p); return keep; });
   oncoming = oncoming.filter(c => { const keep = c.x > player.x - 500; if(!keep) drop(c); return keep; });
+  stops = stops.filter(st => { const keep = st.x > minX - 400; if(!keep) drop(st); return keep; });
 
   camX = player.x - SCREEN_X;
   if(player.finished){
@@ -1158,6 +1309,10 @@ function syncScene(dt){
     if(o.flag) o.flag.rotation.y = Math.sin(now/150 + o.ph) * .35;
   }
   for(const c of oncoming) place(c.mesh, c.x, c.y, 0, Math.PI);
+  for(const st of stops){
+    place(st.mesh, st.x, st.y, 0);
+    for(const p of st.people){ p.mesh.position.set((p.y - st.y)*S, p.walking ? Math.abs(Math.sin(now/120))*.06 : 0, -p.x*S); }
+  }
   padTex && (padTex.offset.y = -(now/400) % 1);
   for(const p of pickups){
     if(p.type === 'star'){ place(p.mesh, p.x, p.y, 1 + Math.sin(now/220 + p.t)*.15); p.spin.rotation.y = now/300; p.spin.rotation.x = Math.sin(now/400)*.4; continue; }
@@ -1304,12 +1459,13 @@ function drawHUD(){
   ctx.font = '700 12px ' + getFont('body'); ctx.fillStyle = '#a3a7b3'; ctx.fillText('km/h', W - 20, 508); ctx.textAlign = 'left';
 
   for(const o of obs){
-    if(o.type !== 'moped' || o.fly || o.wrecked || o.vx <= player.speed || o.x > player.x - 20 || player.x - o.x > 900) continue;
+    if((o.type !== 'moped' && o.type !== 'dozer') || o.fly || o.wrecked || o.vx <= player.speed || o.x > player.x - 20 || player.x - o.x > (o.type === 'dozer' ? 1400 : 900)) continue;
+    const label = o.type === 'dozer' ? 'BULLDOZER BEHIND!' : 'MOPED BEHIND!';
     const q = proj(player.x + 40, o.y, .3), a = .6 + .4*Math.sin(performance.now()/55);
     const x = clamp(q.x, 90, W - 90), y = 440;
     ctx.fillStyle = 'rgba(255,163,26,' + a + ')';
     ctx.beginPath(); ctx.moveTo(x - 22, y + 14); ctx.lineTo(x, y - 8); ctx.lineTo(x + 22, y + 14); ctx.lineTo(x + 12, y + 14); ctx.lineTo(x, y + 3); ctx.lineTo(x - 12, y + 14); ctx.closePath(); ctx.fill();
-    ctx.font = '16px ' + getFont('display'); ctx.textAlign = 'center'; ctx.fillStyle = 'rgba(0,0,0,.55)'; ctx.fillText('MOPED BEHIND!', x + 2, y - 12); ctx.fillStyle = '#ffa31a'; ctx.fillText('MOPED BEHIND!', x, y - 14); ctx.textAlign = 'left';
+    ctx.font = '16px ' + getFont('display'); ctx.textAlign = 'center'; ctx.fillStyle = 'rgba(0,0,0,.55)'; ctx.fillText(label, x + 2, y - 12); ctx.fillStyle = '#ffa31a'; ctx.fillText(label, x, y - 14); ctx.textAlign = 'left';
   }
   if(player.wipe > 0) centerText('WIPEOUT!', 250, 46, '#ff4d3d');
 }
@@ -1518,7 +1674,7 @@ function frame(now){
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
-window.__bb = { addObs, get pickups(){ return pickups; }, spawnMoped, spawnPuller, get spots(){ return spots; }, get mode(){ return mode; }, get player(){ return player; }, get racers(){ return racers; }, get obs(){ return obs; }, startRace, keys, onPress, setCam(m){ camMode = m; } };
+window.__bb = { spawnBus, get stops(){ return stops; }, addObs, get pickups(){ return pickups; }, spawnMoped, spawnPuller, get spots(){ return spots; }, get mode(){ return mode; }, get player(){ return player; }, get racers(){ return racers; }, get obs(){ return obs; }, startRace, keys, onPress, setCam(m){ camMode = m; } };
 })();
 </script>
 <script>
