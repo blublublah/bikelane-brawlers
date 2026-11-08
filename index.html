@@ -1,0 +1,1401 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Bikelane Brawlers</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#15171d">
+<meta name="description" content="Race, jump and brawl your way down the bike lane.">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Brawlers">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
+<link rel="preload" href="fonts/bungee-latin-400-normal.woff2" as="font" type="font/woff2" crossorigin>
+<style>
+@font-face{font-family:'Bungee';font-style:normal;font-weight:400;font-display:swap;src:url(fonts/bungee-latin-400-normal.woff2) format('woff2')}
+@font-face{font-family:'Chakra Petch';font-style:normal;font-weight:500;font-display:swap;src:url(fonts/chakra-petch-latin-500-normal.woff2) format('woff2')}
+@font-face{font-family:'Chakra Petch';font-style:normal;font-weight:700;font-display:swap;src:url(fonts/chakra-petch-latin-700-normal.woff2) format('woff2')}
+/* Layout: one arcade cabinet screen. WebGL street underneath, 2D HUD canvas on top, legend or touch pad beneath. */
+:root{
+  --bg:#15171d; --panel:#21252e; --fg:#f3efe4; --muted:#a3a7b3;
+  --accent:#ffcc1a; --lane:#2f8f5b; --danger:#ff4d3d;
+  --display:'Bungee', Impact, 'Arial Black', sans-serif;
+  --body:'Chakra Petch', 'Segoe UI', system-ui, sans-serif;
+  color-scheme:dark;
+}
+html,body{height:100%}
+body{
+  background:var(--bg); color:var(--fg); font-family:var(--body);
+  margin:0; box-sizing:border-box; overflow:hidden;
+  padding-left:max(16px, env(safe-area-inset-left, 0px));
+  padding-right:max(16px, env(safe-area-inset-right, 0px));
+  padding-top:max(12px, env(safe-area-inset-top, 0px));
+  padding-bottom:max(12px, env(safe-area-inset-bottom, 0px));
+  -webkit-touch-callout:none; overscroll-behavior:none;
+  display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px;
+  user-select:none; -webkit-user-select:none; touch-action:manipulation;
+}
+#stage{position:relative; max-width:100%; border-radius:8px; overflow:hidden; background:#000; box-shadow:0 0 0 2px var(--panel), 0 18px 40px rgba(0,0,0,.45); touch-action:none}
+#stage canvas{position:absolute; inset:0; width:100%; height:100%; display:block}
+#legend{display:flex; flex-wrap:wrap; gap:6px 18px; justify-content:center; font-size:13px; color:var(--muted); max-width:960px}
+#legend b{color:var(--fg); font-weight:700}
+kbd{font-family:var(--body); font-weight:700; font-size:12px; color:var(--bg); background:var(--fg); border-radius:4px; padding:1px 6px; letter-spacing:.03em}
+#pad{display:none; width:100%; max-width:960px; justify-content:space-between; gap:10px; touch-action:none}
+#pad .grp{display:flex; gap:8px}
+#pad button{
+  font-family:var(--display); font-size:15px; color:var(--fg); background:var(--panel);
+  border:2px solid #3a3f4b; border-radius:12px; min-width:64px; height:60px; padding:0 10px;
+  touch-action:none; -webkit-tap-highlight-color:transparent;
+}
+#pad button.on{background:var(--accent); color:var(--bg); border-color:var(--accent)}
+#pad button.hot{border-color:var(--accent)}
+body.touch #pad{display:flex}
+body.touch #legend{display:none}
+#err[hidden]{display:none}
+#err{position:absolute; inset:0; display:flex; align-items:center; justify-content:center; text-align:center; padding:24px; font-size:16px; background:var(--bg)}
+@media (max-width:560px){ #pad button{min-width:52px; height:54px; font-size:13px} }
+#upd{position:fixed; left:50%; transform:translateX(-50%); top:max(10px, env(safe-area-inset-top, 0px)); z-index:10;
+  font-family:var(--display); font-size:14px; color:var(--bg); background:var(--accent); border:0; border-radius:999px;
+  padding:12px 20px; box-shadow:0 8px 24px rgba(0,0,0,.5); -webkit-tap-highlight-color:transparent}
+#upd[hidden]{display:none}
+button:focus-visible{outline:3px solid var(--accent); outline-offset:2px}
+</style>
+</head>
+<body>
+
+<div id="stage">
+  <canvas id="gl" aria-label="Bikelane Brawlers 3D street"></canvas>
+  <canvas id="hud" aria-label="Bikelane Brawlers scoreboard"></canvas>
+  <div id="err" hidden>The 3D engine didn't load. Close the app and open it again.</div>
+</div>
+<div id="legend">
+  <span><kbd>←</kbd> <kbd>→</kbd> <b>steer</b></span>
+  <span><kbd>Space</kbd> <b>jump</b></span>
+  <span><kbd>C</kbd> camera</span>
+  <span><kbd>P</kbd> pause · <kbd>M</kbd> mute · <kbd>R</kbd> restart</span>
+</div>
+<div id="pad">
+  <div class="grp">
+    <button data-k="left" aria-label="Steer left">◀</button>
+    <button data-k="right" aria-label="Steer right">▶</button>
+  </div>
+  <div class="grp">
+    <button data-k="pause" aria-label="Pause">II</button>
+    <button data-k="jump" class="hot">Jump</button>
+  </div>
+</div>
+
+<button id="upd" hidden>New version ready. Tap to update</button>
+<script src="three.min.js"></script>
+<script>
+(() => {
+if(!window.THREE){ document.getElementById('err').hidden = false; return; }
+const T = THREE;
+const glc = document.getElementById('gl');
+const hud = document.getElementById('hud');
+const ctx = hud.getContext('2d');
+const stage = document.getElementById('stage');
+const W = 960, H = 540;
+let K = 1;
+
+// ---------- world geometry (game logic in "px": x = distance along the street, y = across it) ----------
+const PX_PER_M = 20;
+const RACE_M = 1500;
+const FINISH = RACE_M * PX_PER_M;
+const ROAD_TOP = 58, CENTER = 150, ROAD_EDGE = 262, BIKE_TOP = 282, BIKE_BOT = 412, CURB = 420, WALK_END = 560;
+const YMIN = 170, YMAX = 400;
+const SCREEN_X = 250;
+// px -> metres in 3D. Street runs along -Z, road on the left (-X), sidewalk on the right (+X).
+const S = 1/PX_PER_M, ZS = 1/28, LAT0 = 300;
+const lat = y => (y - LAT0) * S;
+const fwd = x => -x * S;
+
+const CAR_COLORS = ['#d9dde4','#2b2f3a','#b3202a','#2d5fa8','#6f7682','#e7b533','#3d7a4f','#8a4fb0'];
+
+// ---------- helpers ----------
+const rand = (a,b) => a + Math.random()*(b-a);
+const pick = a => a[(Math.random()*a.length)|0];
+const clamp = (v,a,b) => v<a?a:v>b?b:v;
+const hash = i => { let x = Math.sin(i*127.1 + 311.7)*43758.5453; return x - Math.floor(x); };
+function rr(x,y,w,h,r){ ctx.beginPath(); ctx.roundRect(x,y,w,h,r); ctx.fill(); }
+function circ(x,y,r){ ctx.beginPath(); ctx.arc(x,y,Math.max(.1,r),0,Math.PI*2); ctx.fill(); }
+function fmtTime(t){ const m=Math.floor(t/60), s=t-m*60; return m+':'+(s<10?'0':'')+s.toFixed(2); }
+function ord(n){ return n+(['th','st','nd','rd'][(n%100-20)%10]||['th','st','nd','rd'][n%100]||'th'); }
+function lsGet(k){ try{ return localStorage.getItem(k); }catch(e){ return null; } }
+function lsSet(k,v){ try{ localStorage.setItem(k,v); }catch(e){} }
+function shade(hex, amt){
+  const n = parseInt(hex.slice(1), 16); let r = n >> 16, g = (n >> 8) & 255, b = n & 255;
+  const f = v => clamp(Math.round(amt < 0 ? v*(1+amt) : v + (255 - v)*amt), 0, 255);
+  return '#' + [f(r),f(g),f(b)].map(v => v.toString(16).padStart(2,'0')).join('');
+}
+
+// ---------- audio ----------
+let AC = null, muted = false;
+function initAudio(){ if(AC) return; try{ AC = new (window.AudioContext||window.webkitAudioContext)(); }catch(e){} }
+function sfx(f, d=.1, type='square', slide=0, vol=.05){
+  if(!AC || muted) return;
+  const t = AC.currentTime, o = AC.createOscillator(), g = AC.createGain();
+  o.type = type; o.frequency.setValueAtTime(f, t);
+  if(slide) o.frequency.exponentialRampToValueAtTime(Math.max(30, f+slide), t+d);
+  g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(.0001, t+d);
+  o.connect(g).connect(AC.destination); o.start(t); o.stop(t+d+.02);
+}
+
+// =====================================================================
+// 3D scene
+// =====================================================================
+const renderer = new T.WebGLRenderer({ canvas: glc, antialias: true });
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = T.PCFSoftShadowMap;
+const SKY = '#a9cbe6';
+const scene = new T.Scene();
+scene.background = new T.Color(SKY);
+scene.fog = new T.Fog(SKY, 70, 175);
+const camera = new T.PerspectiveCamera(62, 16/9, .1, 420);
+scene.add(new T.HemisphereLight('#e6f2ff', '#6b5f4c', 1.9));
+const sun = new T.DirectionalLight('#fff1d6', 2.4);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+Object.assign(sun.shadow.camera, { left:-34, right:34, top:34, bottom:-34, near:1, far:120 });
+sun.shadow.bias = -.0006;
+scene.add(sun, sun.target);
+
+const matCache = {}, geoCache = {};
+function mat(color, glow){
+  const k = color + (glow ? '!' : '');
+  return matCache[k] || (matCache[k] = new T.MeshLambertMaterial({ color, emissive: glow ? color : 0x000000, emissiveIntensity: glow ? .9 : 0 }));
+}
+const box = (w,h,d) => geoCache['b'+w+'|'+h+'|'+d] || (geoCache['b'+w+'|'+h+'|'+d] = new T.BoxGeometry(w,h,d));
+const cyl = (r1,r2,h,s=12) => geoCache['c'+r1+'|'+r2+'|'+h+'|'+s] || (geoCache['c'+r1+'|'+r2+'|'+h+'|'+s] = new T.CylinderGeometry(r1,r2,h,s));
+const sph = (r,a=1) => geoCache['s'+r+'|'+a] || (geoCache['s'+r+'|'+a] = new T.SphereGeometry(r, 16, 10, 0, Math.PI*2, 0, Math.PI*a));
+function add(parent, geo, m, x=0, y=0, z=0, rx=0, ry=0, rz=0, shadow=true){
+  const mesh = new T.Mesh(geo, m);
+  mesh.position.set(x,y,z); mesh.rotation.set(rx,ry,rz);
+  mesh.castShadow = shadow;
+  parent.add(mesh); return mesh;
+}
+function canvasTex(w, h, draw, repX=1, repY=1){
+  const c = document.createElement('canvas'); c.width = w; c.height = h;
+  draw(c.getContext('2d'), w, h);
+  const t = new T.CanvasTexture(c);
+  t.wrapS = t.wrapT = T.RepeatWrapping; t.repeat.set(repX, repY);
+  t.anisotropy = renderer.capabilities.getMaxAnisotropy();
+  t.colorSpace = T.SRGBColorSpace;
+  return t;
+}
+
+// ---------- the course ----------
+// Gameplay runs on a straight line (x along the street, y across it). The 3D view bends that line into a winding street.
+const S0 = -160, S1 = FINISH*S + 320, SEG = 260;
+const bends = [];
+{ let s = 130; while(s < S1 - 120){ const L = rand(110, 170); bends.push({ s0: s, L, A: (Math.random() < .5 ? -1 : 1) * rand(.28, .62) }); s += L + rand(50, 150); } }
+const NT = Math.ceil(S1 - S0) + 2, TX = new Float32Array(NT), TZ = new Float32Array(NT), TH = new Float32Array(NT);
+{ let x = 0, z = -S0, th = 0;
+  for(let i = 0; i < NT; i++){
+    const s = S0 + i; let k = 0;
+    for(const b of bends) if(s >= b.s0 && s < b.s0 + b.L) k += b.A / b.L * (1 - Math.cos(2*Math.PI*(s - b.s0)/b.L));
+    TX[i] = x; TZ[i] = z; TH[i] = th;
+    th += k; x += Math.sin(th); z -= Math.cos(th);
+  } }
+const FR = { x:0, z:0, th:0 };
+function fr(s){
+  const u = clamp(s - S0, 0, NT - 1.001), i = u|0, f = u - i;
+  FR.x = TX[i] + (TX[i+1] - TX[i])*f; FR.z = TZ[i] + (TZ[i+1] - TZ[i])*f; FR.th = TH[i] + (TH[i+1] - TH[i])*f;
+  return FR;
+}
+// metres along / across -> world
+function placeM(obj, s, l, h, yaw=0){ const f = fr(s); obj.position.set(f.x + Math.cos(f.th)*l, h, f.z + Math.sin(f.th)*l); obj.rotation.y = -f.th + yaw; }
+// game px -> world
+function place(obj, xpx, ypx, h, yaw=0){ placeM(obj, xpx*S, lat(ypx), h, yaw); }
+function toW(xpx, ypx, h, out){ const f = fr(xpx*S), l = lat(ypx); return out.set(f.x + Math.cos(f.th)*l, h, f.z + Math.sin(f.th)*l); }
+
+// ---------- static street ----------
+function ribbon(s0, s1, l0, l1, h0, h1, material, tile, uRep=1, step=2){
+  const n = Math.ceil((s1 - s0)/step) + 1, pos = new Float32Array(n*6), uv = new Float32Array(n*4), idx = [];
+  for(let i = 0; i < n; i++){
+    const s = Math.min(s1, s0 + i*step), f = fr(s), c = Math.cos(f.th), sn = Math.sin(f.th), v = (s - s0)/tile;
+    pos.set([f.x + c*l0, h0, f.z + sn*l0, f.x + c*l1, h1, f.z + sn*l1], i*6);
+    uv.set([0, v, uRep, v], i*4);
+    if(i){ const a = (i-1)*2; idx.push(a, a+1, a+2, a+1, a+3, a+2); }
+  }
+  const g = new T.BufferGeometry();
+  g.setAttribute('position', new T.BufferAttribute(pos, 3)); g.setAttribute('uv', new T.BufferAttribute(uv, 2)); g.setIndex(idx);
+  g.computeVertexNormals();
+  const m = new T.Mesh(g, material); m.receiveShadow = true; scene.add(m); return m;
+}
+function strip(y0, y1, material, h, tile, uRep=1){
+  for(let s = S0; s < S1; s += SEG) ribbon(s, Math.min(S1, s + SEG), lat(y0), lat(y1), h, h, material, tile, uRep);
+}
+function wall(y, h0, h1, material){
+  for(let s = S0; s < S1; s += SEG) ribbon(s, Math.min(S1, s + SEG), lat(y), lat(y), h0, h1, material, 10);
+}
+// road + buffer: canvas is drawn across (x) by along (y). 1px = 1 game px across; 400px = 20 m along.
+const roadTex = canvasTex(BIKE_TOP - ROAD_TOP, 400, (g, w, h) => {
+  g.fillStyle = '#3d4047'; g.fillRect(0,0,w,h);
+  for(let i=0;i<900;i++){ g.fillStyle = Math.random()<.5 ? 'rgba(255,255,255,.05)' : 'rgba(0,0,0,.08)'; g.fillRect(Math.random()*w, Math.random()*h, 2, 2); }
+  const cy = CENTER - ROAD_TOP;
+  g.fillStyle = '#e7bb2e'; g.fillRect(cy - 5, 0, 3, h); g.fillRect(cy + 2, 0, 3, h);
+  const e = ROAD_EDGE - ROAD_TOP;
+  g.fillStyle = '#eceae3'; g.fillRect(e, 0, 3, h); g.fillRect(w - 3, 0, 3, h);
+  g.strokeStyle = 'rgba(236,234,227,.7)'; g.lineWidth = 3;
+  for(let y = -20; y < h + 20; y += 40){ g.beginPath(); g.moveTo(e + 3, y); g.lineTo(w - 3, y + 26); g.stroke(); }
+});
+strip(ROAD_TOP, BIKE_TOP, new T.MeshLambertMaterial({ map: roadTex }), 0, 20);
+const bikeTex = canvasTex(BIKE_BOT - BIKE_TOP, 520, (g, w, h) => {
+  g.fillStyle = '#2f8f5b'; g.fillRect(0,0,w,h);
+  for(let i=0;i<500;i++){ g.fillStyle = 'rgba(0,0,0,.07)'; g.fillRect(Math.random()*w, Math.random()*h, 3, 2); }
+  g.save(); g.translate(w/2, h*.55); g.rotate(-Math.PI/2); g.scale(1.6, 1.6);
+  g.strokeStyle = 'rgba(255,255,255,.85)'; g.lineWidth = 3;
+  g.beginPath(); g.arc(-14, 6, 9, 0, 7); g.stroke(); g.beginPath(); g.arc(14, 6, 9, 0, 7); g.stroke();
+  g.beginPath(); g.moveTo(-14, 6); g.lineTo(-3, -8); g.lineTo(10, -8); g.lineTo(14, 6); g.moveTo(-3,-8); g.lineTo(2, 6); g.lineTo(10,-8); g.moveTo(-6,-12); g.lineTo(0,-12); g.moveTo(10,-8); g.lineTo(8,-14); g.lineTo(13,-14); g.stroke();
+  g.fillStyle = 'rgba(255,255,255,.85)'; g.beginPath(); g.moveTo(40, -7); g.lineTo(64, 0); g.lineTo(40, 7); g.closePath(); g.fill(); g.fillRect(26, -2, 16, 4);
+  g.restore();
+});
+strip(BIKE_TOP, BIKE_BOT, new T.MeshLambertMaterial({ map: bikeTex }), 0, 26);
+const walkTex = canvasTex(128, 128, (g, w, h) => {
+  g.fillStyle = '#b3afa5'; g.fillRect(0,0,w,h);
+  for(let i=0;i<300;i++){ g.fillStyle = 'rgba(0,0,0,.05)'; g.fillRect(Math.random()*w, Math.random()*h, 2, 2); }
+  g.fillStyle = 'rgba(0,0,0,.18)'; g.fillRect(0,0,w,2); g.fillRect(0,0,2,h);
+});
+const walkMat = new T.MeshLambertMaterial({ map: walkTex });
+strip(CURB, WALK_END, walkMat, .15, 2.5, (WALK_END - CURB)*S/2.5);
+strip(-80, ROAD_TOP, walkMat, .15, 2.5, (ROAD_TOP + 80)*S/2.5);
+// curbs
+const curbMat = new T.MeshLambertMaterial({ color: '#cfcbc1', side: T.DoubleSide });
+strip(BIKE_BOT, CURB, curbMat, .15, 10);
+wall(BIKE_BOT, 0, .15, curbMat); wall(ROAD_TOP, 0, .15, curbMat);
+// ground beyond
+{ let x0 = 1e9, x1 = -1e9, z0 = 1e9, z1 = -1e9;
+  for(let i = 0; i < NT; i += 10){ x0 = Math.min(x0, TX[i]); x1 = Math.max(x1, TX[i]); z0 = Math.min(z0, TZ[i]); z1 = Math.max(z1, TZ[i]); }
+  const g = new T.Mesh(new T.PlaneGeometry(x1 - x0 + 800, z1 - z0 + 800), mat('#4f5a46'));
+  g.rotation.x = -Math.PI/2; g.position.set((x0 + x1)/2, -.03, (z0 + z1)/2); scene.add(g); }
+
+// side streets and driveways on the sidewalk side: cars turn right across the bike lane into these
+const TURN_R = 250; // px radius of a turning car's arc
+const spots = [];
+{ let s = 160; while(s < FINISH*S - 80){ spots.push({ s, x: s*PX_PER_M, kind: Math.random() < .55 ? 'street' : 'drive', used: false }); s += rand(55, 100); } }
+const BPAL = ['#c9b79c','#a8735a','#8d9aa6','#d7cfc0','#7c8a74','#b8a07a','#9b6a5c','#cdbfa8','#6f7d8c'];
+const nearSpot = (s, pad) => spots.some(p => Math.abs(p.s - s) < (p.kind === 'street' ? 6 : 3.4) + pad);
+
+function buildCity(){
+  const dummy = new T.Object3D(), col = new T.Color();
+  const setD = (s, l, h, sx, sy, sz, yaw=0) => { placeM(dummy, s, l, h, yaw); dummy.scale.set(sx, sy, sz); dummy.updateMatrix(); return dummy.matrix; };
+  const lots = [];
+  for(const side of [-1, 1]){
+    let s = S0 + 10;
+    while(s < S1 - 10){
+      const w = rand(8, 18), h = rand(7, 30), d = rand(10, 18), sc = s + w/2;
+      if(side > 0 && nearSpot(sc, w/2)){ s += 1.5; continue; }
+      lots.push({ s: sc, l: side < 0 ? lat(-80) - d/2 : lat(WALK_END) + d/2, w: w - .6, h, d, c: pick(BPAL) });
+      s += w;
+    }
+  }
+  const bGeo = new T.BoxGeometry(1,1,1); bGeo.translate(0, .5, 0);
+  const winTex = canvasTex(64, 64, (g, w, h) => {
+    g.fillStyle = '#ffffff'; g.fillRect(0,0,w,h);
+    g.fillStyle = '#5d6b7a'; g.fillRect(14, 16, 36, 30);
+    g.fillStyle = 'rgba(255,255,255,.35)'; g.fillRect(14, 16, 12, 30);
+  });
+  const uv = bGeo.attributes.uv; for(let i=0;i<uv.count;i++){ uv.setXY(i, uv.getX(i)*4, uv.getY(i)*6); }
+  const bm = new T.InstancedMesh(bGeo, new T.MeshLambertMaterial({ map: winTex }), lots.length);
+  lots.forEach((b, i) => { bm.setMatrixAt(i, setD(b.s, b.l, 0, b.d, b.h, b.w)); bm.setColorAt(i, col.set(b.c)); });
+  bm.castShadow = true; bm.receiveShadow = true; scene.add(bm);
+
+  const trees = [], lamps = [];
+  for(let s = S0 + 5; s < S1; s += 15){ if(!nearSpot(s, 2.5)) trees.push([s, lat(500)]); trees.push([s + 7, lat(-30)]); }
+  for(let s = S0 + 10; s < S1; s += 32) if(!nearSpot(s, 1.5)) lamps.push(s);
+  const trunk = new T.InstancedMesh(cyl(.16,.22,2.4,8), mat('#6b4f36'), trees.length);
+  const leaf = new T.InstancedMesh(new T.IcosahedronGeometry(1.7, 1), mat('#3d7f4a'), trees.length);
+  trees.forEach(([s, l], i) => {
+    trunk.setMatrixAt(i, setD(s, l, 1.35, 1, 1, 1));
+    const k = .85 + hash(i)*.5; leaf.setMatrixAt(i, setD(s, l, 3.4, k, k*1.1, k, hash(i+4)*3));
+    leaf.setColorAt(i, col.set(['#3d7f4a','#4f8f3e','#2f6e45'][(hash(i+9)*3)|0]));
+  });
+  trunk.castShadow = leaf.castShadow = true; scene.add(trunk, leaf);
+  const pole = new T.InstancedMesh(cyl(.08,.1,6.5,8), mat('#4a4f59'), lamps.length);
+  const arm = new T.InstancedMesh(box(3.2,.12,.12), mat('#4a4f59'), lamps.length);
+  const bulb = new T.InstancedMesh(box(.6,.15,.35), mat('#fff3c4', true), lamps.length);
+  lamps.forEach((s, i) => {
+    pole.setMatrixAt(i, setD(s, lat(426), 3.25, 1, 1, 1));
+    arm.setMatrixAt(i, setD(s, lat(426) - 1.55, 6.45, 1, 1, 1));
+    bulb.setMatrixAt(i, setD(s, lat(426) - 3, 6.33, 1, 1, 1));
+  });
+  pole.castShadow = arm.castShadow = true; scene.add(pole, arm, bulb);
+
+  // the side streets and driveways themselves
+  const asphalt = mat('#3d4047'), paint = mat('#eceae3'), conc = mat('#a29d92');
+  for(const p of spots){
+    const g = new T.Group(); placeM(g, p.s, 0, 0); scene.add(g);
+    const l0 = lat(CURB) - .02;
+    // dashed "watch for turning cars" markings across the bike lane
+    for(let i = 0; i < 6; i++){ add(g, box(.5, .02, .18), paint, lat(BIKE_TOP) + .5 + i*1.2, .012, -(p.kind === 'street' ? 5 : 2.4), 0,0,0,false); add(g, box(.5, .02, .18), paint, lat(BIKE_TOP) + .5 + i*1.2, .012, (p.kind === 'street' ? 5 : 2.4), 0,0,0,false); }
+    if(p.kind === 'street'){
+      const l1 = lat(WALK_END) + 45, w = 10;
+      const m = new T.Mesh(new T.PlaneGeometry(l1 - l0, w), asphalt); m.rotation.x = -Math.PI/2; m.position.set((l0 + l1)/2, .16, 0); m.receiveShadow = true; g.add(m);
+      for(let i = 0; i < 6; i++) add(g, box(lat(WALK_END) - l0 - .8, .02, .7), paint, (l0 + lat(WALK_END))/2, .175, -w/2 + .9 + i*1.65, 0,0,0,false);
+      add(g, box(l1 - lat(WALK_END) - 3, .02, .15), mat('#e7bb2e'), (lat(WALK_END) + l1)/2 + 1.5, .175, 0, 0,0,0,false);
+      // street-name sign on the corner
+      add(g, cyl(.05,.05,3,6), mat('#4a4f59'), lat(WALK_END) - .5, 1.5, -w/2 - .6);
+      add(g, box(.05, .3, 1.4), mat('#2d6e4a'), lat(WALK_END) - .5, 2.9, -w/2 - .6, 0,0,0,false);
+    } else {
+      const l1 = lat(WALK_END) + 4, w = 4.6;
+      const m = new T.Mesh(new T.PlaneGeometry(l1 - l0, w), conc); m.rotation.x = -Math.PI/2; m.position.set((l0 + l1)/2, .16, 0); m.receiveShadow = true; g.add(m);
+      add(g, box(6, 3, 6.4), mat(pick(BPAL)), l1 + 3, 1.5, 0);
+      add(g, box(6.6, .25, 7), mat('#5b4a3f'), l1 + 3, 3.1, 0);
+      add(g, box(.06, 2.4, 3.8), mat('#62666e'), l1 - .02, 1.2, 0, 0,0,0,false);
+    }
+  }
+}
+buildCity();
+
+// start + finish
+function lineAt(x, finish){
+  const g = new T.Group(); placeM(g, x*S, 0, 0); scene.add(g);
+  const tex = canvasTex(finish ? 64 : 8, 8, (c, w, h) => {
+    if(!finish){ c.fillStyle = '#fafafa'; c.fillRect(0,0,w,h); return; }
+    for(let i=0;i<8;i++) for(let j=0;j<2;j++){ c.fillStyle = (i+j)%2 ? '#111' : '#fafafa'; c.fillRect(i*8, j*4, 8, 4); }
+  });
+  const w = (BIKE_BOT - ROAD_TOP)*S;
+  const m = new T.Mesh(new T.PlaneGeometry(w, finish ? 1.2 : .4), new T.MeshLambertMaterial({ map: tex }));
+  m.rotation.x = -Math.PI/2; m.position.set(lat((ROAD_TOP + BIKE_BOT)/2), .02, 0); m.receiveShadow = true; g.add(m);
+  if(finish){
+    tex.repeat.set(4, 1);
+    const xl = lat(ROAD_TOP) - .6, xr = lat(BIKE_BOT) + .8;
+    add(g, cyl(.22,.22,7,10), mat('#2b2f3a'), xl, 3.5, 0); add(g, cyl(.22,.22,7,10), mat('#2b2f3a'), xr, 3.5, 0);
+    const bannerTex = canvasTex(1024, 96, (c, cw, ch) => {
+      c.fillStyle = '#ffcc1a'; c.fillRect(0,0,cw,ch);
+      for(let i=0;i<cw;i+=48){ c.fillStyle = (i/48)%2 ? '#111' : '#fafafa'; c.fillRect(i, 0, 48, 12); c.fillStyle = (i/48)%2 ? '#fafafa' : '#111'; c.fillRect(i, ch-12, 48, 12); }
+      c.fillStyle = '#15171d'; c.font = '56px Bungee, Impact, sans-serif'; c.textAlign = 'center'; c.fillText('FINISH  ·  BIKELANE BRAWLERS', cw/2, 68);
+    });
+    bannerTex.wrapS = T.ClampToEdgeWrapping;
+    const banner = new T.Mesh(new T.PlaneGeometry(xr - xl, 1.3), new T.MeshBasicMaterial({ map: bannerTex, side: T.DoubleSide }));
+    banner.position.set((xl + xr)/2, 6.4, 0); g.add(banner);
+    finishBanner = { tex: bannerTex };
+  }
+}
+let finishBanner = null;
+lineAt(0, false); lineAt(FINISH, true);
+
+// ---------- entity models (all face -Z, i.e. the direction of travel) ----------
+function makeCar(o){
+  const L = o.w*S, Wd = o.h*S, van = o.type === 'van' || o.w > 120, g = new T.Group();
+  const c = mat(o.color), glass = mat('#1d2633'), tire = mat('#141414');
+  if(van){
+    add(g, box(Wd, 2.1, L), c, 0, 1.25, 0);
+    add(g, box(Wd*.9, .7, .06), glass, 0, 1.75, -L/2 - .02);
+    add(g, box(Wd + .02, .3, L*.6), mat('#d2622f'), 0, 1.1, L*.12);
+    add(g, box(.06, .55, .9), glass, -Wd/2 - .01, 1.75, -L*.38); add(g, box(.06, .55, .9), glass, Wd/2 + .01, 1.75, -L*.38);
+  } else {
+    add(g, box(Wd, .72, L), c, 0, .62, 0);
+    add(g, box(Wd*.86, .56, L*.5), glass, 0, 1.25, L*.04);
+    add(g, box(Wd*.84, .08, L*.46), c, 0, 1.55, L*.04);
+  }
+  for(const sx of [-1,1]) for(const sz of [-1,1]) add(g, cyl(.36,.36,.28,14), tire, sx*(Wd/2 - .08), .36, sz*L*.32, 0, 0, Math.PI/2);
+  add(g, box(.42,.16,.05), mat('#fff2b8', true), -Wd*.3, .72, -L/2 - .01, 0,0,0, false); add(g, box(.42,.16,.05), mat('#fff2b8', true), Wd*.3, .72, -L/2 - .01, 0,0,0, false);
+  add(g, box(.36,.14,.05), mat('#e8322e', true), -Wd*.32, .78, L/2 + .01, 0,0,0, false); add(g, box(.36,.14,.05), mat('#e8322e', true), Wd*.32, .78, L/2 + .01, 0,0,0, false);
+  if(o.type === 'turn' || o.type === 'pull' || o.turnSpot){
+    o.blinkers = [add(g, box(.2,.16,.2), mat('#ffa31a', true), Wd/2 - .05, .86, -L/2 + .05, 0,0,0,false), add(g, box(.2,.16,.2), mat('#ffa31a', true), Wd/2 - .05, .86, L/2 - .05, 0,0,0,false)];
+  }
+  if(o.parked){
+    o.haz = [];
+    for(const sx of [-1,1]) for(const sz of [-1,1]) o.haz.push(add(g, box(.18,.14,.18), mat('#ffa31a', true), sx*(Wd/2 - .05), .86, sz*(L/2 - .05), 0,0,0, false));
+  }
+  return g;
+}
+function makeRider(g, shirt, y0, headMat){
+  add(g, box(.42,.55,.26), mat(shirt), 0, y0 + .3, .05, -.15);
+  add(g, sph(.15), mat('#e2b48f'), 0, y0 + .74, -.02);
+  if(headMat) add(g, sph(.18, .55), headMat, 0, y0 + .76, -.02);
+}
+function makeMoped(o){
+  const g = new T.Group(), tire = mat('#141414'), c = mat(o.color);
+  add(g, cyl(.28,.28,.12,14), tire, 0, .28, -.62, 0, 0, Math.PI/2); add(g, cyl(.28,.28,.12,14), tire, 0, .28, .6, 0, 0, Math.PI/2);
+  add(g, box(.45,.42,1.25), c, 0, .55, 0);
+  add(g, box(.5,.85,.18), c, 0, .9, -.55, .25);
+  add(g, box(.36,.12,.6), mat('#2a2a2a'), 0, .82, .2);
+  add(g, box(.62,.55,.6), mat('#ece6d6'), 0, 1.15, .6);
+  add(g, box(.64,.14,.62), mat('#d23a33'), 0, 1.2, .6);
+  add(g, cyl(.025,.025,.7,6), mat('#555'), 0, 1.3, -.6, 0, 0, Math.PI/2);
+  add(g, box(.18,.6,.18), mat('#3a3f4b'), -.15, .75, -.05); add(g, box(.18,.6,.18), mat('#3a3f4b'), .15, .75, -.05);
+  makeRider(g, '#4b5263', .95, c);
+  add(g, box(.2,.12,.05), mat('#fff2b8', true), 0, 1.05, -.66, 0,0,0, false);
+  return g;
+}
+function makeMobility(o){
+  const g = new T.Group(), tire = mat('#141414');
+  for(const sx of [-1,1]) for(const sz of [-1,1]) add(g, cyl(.16,.16,.12,12), tire, sx*.42, .16, sz*.55, 0, 0, Math.PI/2);
+  add(g, box(.9,.28,1.4), mat('#c4242c'), 0, .38, 0);
+  add(g, box(.5,.12,.5), mat('#2b2b2b'), 0, .78, .2); add(g, box(.5,.6,.1), mat('#2b2b2b'), 0, 1.05, .45);
+  add(g, cyl(.04,.04,.75,6), mat('#888'), 0, .85, -.45, -.4);
+  add(g, box(.6,.32,.4), mat('#9b6b3c'), 0, .7, -.68);
+  add(g, sph(.1), mat('#7fbf4f'), .12, .9, -.68); add(g, sph(.09), mat('#e9dccb'), -.12, .88, -.7);
+  makeRider(g, o.shirt, .78, null);
+  add(g, sph(.17, .6), mat('#efe9e4'), 0, 1.55, .0);
+  add(g, cyl(.015,.015,2,5), mat('#dddddd'), -.38, 1.4, .6);
+  o.flag = add(g, box(.02,.28,.45), mat('#ff7a1a', true), -.38, 2.25, .82, 0,0,0, false);
+  return g;
+}
+function makePothole(){
+  const g = new T.Group();
+  const rim = new T.Mesh(new T.CircleGeometry(.85, 18), mat('#4a4a46')); rim.rotation.x = -Math.PI/2; rim.position.y = .015; rim.scale.set(1, .7, 1); rim.receiveShadow = true; g.add(rim);
+  const hole = new T.Mesh(new T.CircleGeometry(.68, 18), mat('#151514')); hole.rotation.x = -Math.PI/2; hole.position.y = .02; hole.scale.set(1, .62, 1); g.add(hole);
+  const pud = new T.Mesh(new T.CircleGeometry(.3, 12), mat('#6f8fae')); pud.rotation.x = -Math.PI/2; pud.position.set(.15, .025, .05); g.add(pud);
+  return g;
+}
+function makeCone(){
+  const g = new T.Group();
+  add(g, box(.42,.05,.42), mat('#ff6a13'), 0, .03, 0);
+  add(g, new T.ConeGeometry(.2, .7, 14), mat('#ff6a13'), 0, .38, 0);
+  add(g, cyl(.135,.165,.12,14), mat('#f5f5f5'), 0, .38, 0);
+  return g;
+}
+// boost pads: painted on the lane, never used up, any rider who rolls over one gets a short boost
+let padTex = null, padSign = null;
+function makePad(p){
+  if(!padTex){
+    padTex = canvasTex(64, 64, (g, w, h) => {
+      g.fillStyle = '#0d3a22'; g.fillRect(0, 0, w, h);
+      g.fillStyle = '#39ff8a';
+      g.beginPath(); g.moveTo(6, 44); g.lineTo(w/2, 12); g.lineTo(w - 6, 44); g.lineTo(w - 6, 58); g.lineTo(w/2, 26); g.lineTo(6, 58); g.closePath(); g.fill();
+    }, 1, 4);
+    padTex.wrapS = T.ClampToEdgeWrapping;
+    padSign = canvasTex(256, 96, (g, w, h) => {
+      g.clearRect(0, 0, w, h);
+      g.fillStyle = 'rgba(57,255,138,.9)'; g.beginPath(); g.roundRect(4, 8, w - 8, h - 16, 18); g.fill();
+      g.fillStyle = '#0d3a22'; g.font = '56px Bungee, Impact, sans-serif'; g.textAlign = 'center'; g.fillText('BOOST', w/2, 70);
+    });
+    padSign.wrapS = padSign.wrapT = T.ClampToEdgeWrapping;
+  }
+  const g = new T.Group();
+  const m = new T.Mesh(new T.PlaneGeometry(2.8, 5), new T.MeshBasicMaterial({ map: padTex }));
+  m.rotation.x = -Math.PI/2; m.position.y = .03; g.add(m);
+  const rim = new T.Mesh(new T.RingGeometry(1, 1.15, 4, 1), new T.MeshBasicMaterial({ color: '#d8ffe6', transparent: true }));
+  rim.rotation.set(-Math.PI/2, 0, Math.PI/4); rim.scale.set(1.45, 2.55, 1); rim.position.y = .035; g.add(rim);
+  const sign = new T.Mesh(new T.PlaneGeometry(1.8, .68), new T.MeshBasicMaterial({ map: padSign, transparent: true, side: T.DoubleSide, depthWrite: false }));
+  sign.position.y = 2.6; g.add(sign); p.sign = sign; p.padMat = rim.material;
+  return g;
+}
+// rare "Unstoppable" power-up: a spinning gold gem
+function makeStar(p){
+  const g = new T.Group(), inner = new T.Group(); g.add(inner); p.spin = inner;
+  add(inner, new T.OctahedronGeometry(.42, 0), mat('#ffcc1a', true), 0, 0, 0);
+  add(inner, new T.OctahedronGeometry(.25, 0), mat('#fff3b0', true), 0, 0, 0);
+  const ring = new T.Mesh(new T.RingGeometry(.55, .78, 24), new T.MeshBasicMaterial({ color: '#ffcc1a', transparent: true, opacity: .6, side: T.DoubleSide }));
+  ring.rotation.x = -Math.PI/2; ring.position.y = -.85; g.add(ring);
+  return g;
+}
+function makePickup(p){
+  const g = new T.Group(), inner = new T.Group(); g.add(inner); p.spin = inner;
+  if(p.type === 'battery'){
+    add(inner, box(.62,.36,.36), mat('#1d2a22'), 0, 0, 0); add(inner, box(.5,.3,.38), mat('#5be38a', true), -.04, 0, 0); add(inner, box(.1,.14,.14), mat('#cfd3dc'), .36, 0, 0);
+  } else {
+    add(inner, box(.5,.5,.5), mat('#f3efe4'), 0, 0, 0); add(inner, box(.14,.36,.52), mat('#e0362f', true), 0, 0, 0); add(inner, box(.36,.14,.52), mat('#e0362f', true), 0, 0, 0);
+  }
+  const ring = new T.Mesh(new T.RingGeometry(.5, .7, 24), new T.MeshBasicMaterial({ color: '#8ef0b0', transparent: true, opacity: .55, side: T.DoubleSide }));
+  ring.rotation.x = -Math.PI/2; ring.position.y = -.85; g.add(ring);
+  return g;
+}
+function makeRacer(r){
+  const root = new T.Group(), tilt = new T.Group(); root.add(tilt);
+  const dark = mat('#23262e'), metal = mat('#9aa0ad'), body = mat(r.color), pants = mat(shade(r.color, -.6)), tire = mat('#141414');
+  add(tilt, box(.24,.07,1.0), dark, 0, .16, 0);
+  add(tilt, box(.1,.02,.8), mat(r.color, true), 0, .2, 0, 0,0,0, false);
+  add(tilt, cyl(.13,.13,.08,14), tire, 0, .13, -.5, 0, 0, Math.PI/2); add(tilt, cyl(.13,.13,.08,14), tire, 0, .13, .48, 0, 0, Math.PI/2);
+  add(tilt, cyl(.03,.03,1.0,8), metal, 0, .64, -.46, -.12);
+  add(tilt, cyl(.025,.025,.62,8), metal, 0, 1.13, -.52, 0, 0, Math.PI/2);
+  add(tilt, box(.13,.82,.14), pants, -.1, .6, .08); add(tilt, box(.13,.82,.14), pants, .1, .6, -.06);
+  add(tilt, box(.44,.56,.26), body, 0, 1.28, 0, -.25);
+  add(tilt, sph(.14), mat('#e2b48f'), 0, 1.72, -.1);
+  add(tilt, sph(.18, .55), body, 0, 1.74, -.1);
+  add(tilt, box(.26,.06,.04), mat('#1b2533'), 0, 1.7, -.27, 0,0,0, false);
+  r.arms = {};
+  for(const s of [-1, 1]){
+    const pivot = new T.Group(); pivot.position.set(s*.25, 1.46, -.08); tilt.add(pivot);
+    add(pivot, box(.1,.1,.55), body, 0, -.12, -.25, .45);
+    add(pivot, sph(.07), mat('#e2b48f'), 0, -.24, -.5);
+    r.arms[s] = pivot;
+  }
+  root.traverse(m => { if(m.isMesh){ m.castShadow = true; } });
+  if(r.isPlayer){
+    r.aura = new T.Mesh(new T.SphereGeometry(1.25, 20, 14), new T.MeshBasicMaterial({ color: '#ffcc1a', transparent: true, opacity: .28, depthWrite: false }));
+    r.aura.position.y = 1; r.aura.visible = false; root.add(r.aura);
+  }
+  r.mesh = root; r.tilt = tilt;
+  scene.add(root);
+}
+
+// =====================================================================
+// game state & logic
+// =====================================================================
+let mode = 'title'; // title | countdown | race | finish | paused
+let prevMode = 'race';
+let racers = [], player, obs = [], pickups = [], oncoming = [], fx = [], parts = [];
+let camX = 0, raceT = 0, countT = 0, nextSpawn = 0, roadT = 0, oncT = 0, finishCount = 0, finishDelay = 0, shake = 0, titleT = 0, mopedT = 0;
+let camMode = 0; // 0 chase, 1 high
+let best = parseFloat(lsGet('bb3d_best')) || 0;
+
+function mkRacer(name, color, isPlayer, y, cruise, skill){
+  const r = { name, color, isPlayer, x:0, y, z:0, vz:0, speed:0, cruise, hp:100, bat:100,
+    wipe:0, spin:0, inv:0, kvy:0, pcd:0, pAnim:0, pDir:1, jcd:0, kos:0, hits:0,
+    finished:false, ftime:0, place:0, steer:0, lean:0, boosting:false, braking:false, target:cruise,
+    ai:{ lane:y, ty:y, boostT:0, last:null, willJump:true, skill:skill||.85, punchT:rand(0,1) } };
+  makeRacer(r);
+  return r;
+}
+
+function drop(o){ if(o.mesh) scene.remove(o.mesh); }
+function reset(){
+  racers.forEach(drop); obs.forEach(drop); pickups.forEach(drop); oncoming.forEach(drop);
+  racers = [
+    mkRacer('Kickstand Kat', '#ff5fa2', false, 300, 352, .86),
+    mkRacer('Dex Rally', '#4fc3ff', false, 330, 360, .9),
+    mkRacer('YOU', '#ffcc1a', true, 360, 372),
+    mkRacer('Big Wheel Barry', '#b47cff', false, 390, 346, .8),
+  ];
+  player = racers[2];
+  racers.forEach((r,i)=>{ r.x = -i*6; });
+  obs = []; pickups = []; oncoming = []; fx = []; parts = [];
+  camX = player.x - SCREEN_X; raceT = 0; countT = 3.2; nextSpawn = 900; roadT = 1.5; oncT = .3; mopedT = rand(4, 6);
+  finishCount = 0; finishDelay = 0; shake = 0;
+  spots.forEach(sp => sp.used = false); cam.init = false;
+}
+
+function addObs(o){
+  if(o.type==='car'||o.type==='van'||o.type==='road'||o.type==='turn'||o.type==='pull') o.mesh = makeCar(o);
+  else if(o.type==='moped') o.mesh = makeMoped(o);
+  else if(o.type==='mobility') o.mesh = makeMobility(o);
+  else if(o.type==='pothole') o.mesh = makePothole();
+  else o.mesh = makeCone();
+  scene.add(o.mesh); obs.push(o);
+}
+
+function spawnAt(x){
+  const prog = x / FINISH;
+  const r = Math.random();
+  if(r < .11){
+    const van = Math.random() < .3;
+    addObs({ type: van?'van':'car', x, y: rand(362,386), w: van?120:90, h: van?38:32, vx:0, color: van?'#e9e6dd':pick(CAR_COLORS), parked:true });
+  } else if(r < .235 && r >= .165){
+    addObs({ type:'mobility', x, y: rand(312,388), w:42, h:30, vx: rand(55,90), ph: rand(0,6), shirt: pick(['#8fb4e8','#e8a0c4','#b7d98f','#e8d38f']) });
+  } else if(false){ // potholes removed
+    addObs({ type:'pothole', x, y: rand(296,398), w:34, h:22, vx:0 });
+  } else if(false){ // cones removed
+    const n = 2 + (Math.random()<.5?1:0), y0 = rand(300, 395 - (n-1)*26);
+    for(let i=0;i<n;i++) addObs({ type:'cone', x: x + i*8, y: y0 + i*26, w:16, h:16, vx:0 });
+  } else if(r < .335){
+    const p = { type: 'pad', x, y: rand(295,398), t: rand(0,6) };
+    p.mesh = makePad(p); scene.add(p.mesh); pickups.push(p);
+  } else if(r < .35){
+    const p = { type: 'star', x, y: rand(300,392), t: rand(0,6) };
+    p.mesh = makeStar(p); scene.add(p.mesh); pickups.push(p);
+  }
+}
+
+function spawnRoadCar(){
+  const v = rand(620, 900);
+  const behind = v > player.speed + 40 && mode === 'race';
+  const x = behind ? player.x - 520 : player.x + 2900;
+  const y = rand(190, 232);
+  if(obs.some(o => (o.type==='road' || o.type==='turn' || o.type==='pull') && Math.abs(o.y - y) < 60 && Math.abs(o.x - x) < 230)) return;
+  const turnSpot = Math.random() < .35 ? spots.find(sp => sp.x - TURN_R > x + 600) : null;
+  addObs({ type:'road', turnSpot, x, y, w: Math.random()<.2?130:98, h:48, vx:v, vmax:v, blind: Math.random() < .35, color: pick(CAR_COLORS), honked:false, behind });
+}
+function spawnTurner(spot){
+  const Xs = spot.x - TURN_R, x = player.x + 2300;
+  if(x > Xs - 150) return;
+  // time it so the car is crossing the bike lane about when you get there
+  const tp = (Xs + .8*TURN_R - player.x) / Math.max(player.speed, 300);
+  const vx = clamp((Xs - x) / Math.max(.5, tp - 1.8) * rand(.8, 1.2), 50, 260);
+  for(const o of obs) if(o.type === 'road' && Math.abs(o.x - x) < 300) o.dead = true;
+  addObs({ type:'turn', x, y:210, w:98, h:48, L:98, Wd:48, vx, a:0, phase:0, spot, color: pick(CAR_COLORS) });
+}
+// a car waits in a side street or driveway, then noses out across the bike lane and turns right onto the road
+function spawnPuller(spot){
+  const y0 = spot.kind === 'drive' ? 630 : 900, HOLD = 470;
+  const wait = rand(0, 9); // the driver leaves whenever they like
+  addObs({ type:'pull', x: spot.x, y: y0, w:98, h:48, L:98, Wd:48, vx:0, a:-Math.PI/2, phase:-1, wait, hold:.5, spot, color: pick(CAR_COLORS) });
+}
+// delivery mopeds now come up from behind at high speed, holding one line through the bike lane
+function spawnMoped(){
+  const y = clamp(player.y + rand(-25, 25), 296, 396);
+  addObs({ type:'moped', fast:true, x: player.x - 1100, y, by:y, w:46, h:20, vx: rand(720, 820), blind: Math.random() < .3, ph: rand(0,6), color: pick(['#e34b3b','#3fa7d6','#f2a23a','#5bbf6a']), warned:false });
+}
+function spawnOncoming(){
+  const c = { x: player.x + 3300, y: rand(80,125), w: Math.random()<.2?130:98, h:46, vx: -rand(420,620), color: pick(CAR_COLORS) };
+  c.mesh = makeCar(c); scene.add(c.mesh); oncoming.push(c);
+}
+
+// ---------- actions ----------
+const ROOF_Z = 64; // delivery truck roof (2.3 m) in jump units
+const roofOf = o => o.type === 'van' ? ROOF_Z : 45; // parked car roof is about 1.6 m
+function jump(r){
+  if(r.vz !== 0 || (r.z > 0 && !r.onVan) || r.jcd > 0 || r.wipe > 0) return;
+  r.onVan = null;
+  r.vz = 470; r.jcd = .2;
+  if(r.isPlayer) sfx(330, .18, 'square', 400, .04);
+}
+
+function punch(a){
+  if(a.pcd > 0 || a.wipe > 0) return;
+  a.pcd = .45; a.pAnim = .2;
+  let best = null, bd = 1e9;
+  for(const b of racers){
+    if(b === a || b.wipe > 0) continue;
+    const dx = b.x - a.x, dy = b.y - a.y;
+    if(Math.abs(dx) < 62 && Math.abs(dy) < 62 && Math.abs(b.z - a.z) < 36){
+      const d = Math.abs(dx) + Math.abs(dy);
+      if(d < bd){ bd = d; best = b; }
+    }
+  }
+  if(best){
+    const dir = Math.sign(best.y - a.y) || (best.y < 300 ? -1 : 1);
+    a.pDir = dir;
+    best.hp -= 20; best.hits++;
+    best.kvy = dir * 430; best.speed *= .72;
+    burst(best.x, best.y, 1.5 + best.z*ZS, '#fff3b0', 12);
+    text(best.x, best.y, pick(['POW!','WHAM!','BIFF!','SMACK!']), a.isPlayer ? '#ffcc1a' : '#ff6b5e', 2.4 + best.z*ZS);
+    if(a.isPlayer || best.isPlayer) sfx(140, .12, 'sawtooth', -80, .09);
+    if(best.isPlayer) shake = .35;
+    if(best.hp <= 0){ wipeout(best); a.kos++; text(best.x, best.y, 'K.O.!', '#ff4d3d', 3.2); }
+  } else {
+    a.pDir = -a.pDir;
+    if(a.isPlayer) sfx(600, .06, 'triangle', -300, .03);
+  }
+}
+
+function wipeout(r){
+  r.wipe = 1.6; r.hp = 0; r.onVan = null; if(r.vz > 0) r.vz = 0;
+  burst(r.x, r.y, .6, '#cfd3dc', 18);
+  if(r.isPlayer){ sfx(90, .45, 'sawtooth', -50, .1); shake = .6; }
+}
+
+const HIT = {
+  car:     { dmg:34, keep:.2,  zMax:34, msg:['BONK!','DOUBLE-PARKED!','NICE PARKING...'] },
+  van:     { dmg:38, keep:.15, zMax:36, msg:['DELIVERY DENIED!','BONK!'] },
+  pull:    { dmg:40, keep:.25, zMax:34, msg:['THEY PULLED OUT!','LOOK BOTH WAYS!','HONK!'] },
+  turn:    { dmg:40, keep:.25, zMax:34, msg:['RIGHT HOOK!','LOOK BEFORE YOU TURN!','USE YOUR MIRRORS!'] },
+  road:    { dmg:42, keep:.35, zMax:34, msg:['STAY IN YOUR LANE!','HONK HONK!'] },
+  moped:   { dmg:22, keep:.5,  zMax:22, msg:['WATCH IT!','MY NOODLES!','OI!','ON YOUR LEFT!'] },
+  mobility:{ dmg:16, keep:.45, zMax:20, msg:["SORRY, MA'AM!",'SORRY, SIR!','MANNERS!'] },
+  pothole: { dmg:10, keep:.7,  zMax:3,  msg:['POTHOLE!','OUCH!'] },
+  cone:    { dmg:6,  keep:.85, zMax:12, msg:['CONED!'] },
+};
+
+// ---------- crash physics: anything light in the lane gets sent flying ----------
+const HEAVY = { road:1, turn:1, pull:1, car:1, van:1 };
+const LIGHT = { moped:1, mobility:1 };
+function launch(o, vx, vy, vz){
+  o.fly = true; o.wrecked = false; o.skid = false; o.vx = vx; o.fvy = vy; o.vz = vz; o.hz = o.hz || 0; o.bounces = 0;
+  o.rot = o.rot || { x:0, y:0, z:0 }; o.spin = { x: rand(-9, 9), y: rand(-7, 7), z: rand(-9, 9) };
+  if(Math.abs(o.x - player.x) < 1400){
+    sfx(200, .28, 'sawtooth', -140, .06);
+    if(Math.random() < .6) text(o.x, o.y, pick(['YEET!','WHOOPS!','AIRMAIL!','SPLAT!']), '#ffd27a', 3);
+    burst(o.x, o.y, 1, '#ffd27a', 8);
+  }
+}
+function flyStep(o, dt){
+  o.x += o.vx*dt; o.y += o.fvy*dt; o.vz -= 1400*dt; o.hz += o.vz*dt;
+  o.rot.x += o.spin.x*dt; o.rot.y += o.spin.y*dt; o.rot.z += o.spin.z*dt;
+  if(o.hz <= 0){
+    o.hz = 0;
+    if(o.vz < -260 && o.bounces < 3){ o.vz = -o.vz*.45; o.vx *= .7; o.fvy *= .7; o.bounces++; o.spin.x *= .5; o.spin.y *= .5; o.spin.z *= .5; }
+    else { o.fly = false; o.wrecked = true; o.vx = 0; o.vz = 0; o.rot.x = 0; o.rot.z = (o.rot.z % 6.28 > 3.14 ? -1 : 1) * 1.45; }
+  }
+}
+// cars are heavy: when two of them meet they shove each other, spin and skid to a stop
+function velOf(o){
+  if(o.skid || o.wrecked) return [o.vx, o.svy || 0];
+  if(o.type === 'turn'){ const v = o.tv || 150; if(o.phase === 1) return [v*Math.cos(o.ang), v*Math.sin(o.ang)]; if(o.phase === 2) return [0, v]; }
+  if(o.type === 'pull'){ if(o.phase === 0) return [0, -120]; if(o.phase === 1) return [150*Math.sin(o.ang), -150*Math.cos(o.ang)]; }
+  return [o.vx, 0];
+}
+function startSkid(o, vx, vy, wz, vz){
+  o.skid = true; o.wrecked = false; o.parked = false;
+  if(o.a === undefined) o.a = 0;
+  o.L = o.L || o.w; o.Wd = o.Wd || o.h;
+  o.vx = vx; o.svy = vy; o.wz = wz; o.vz = vz; o.hz = o.hz || 0; o.lastHit = raceT;
+}
+function skidStep(o, dt){
+  o.x += o.vx*dt; o.y += o.svy*dt; o.a += o.wz*dt; o.wz *= Math.exp(-1.8*dt);
+  const sp = Math.hypot(o.vx, o.svy), ns = Math.max(0, sp - 520*dt);
+  if(sp > 0){ o.vx *= ns/sp; o.svy *= ns/sp; }
+  if(o.hz > 0 || o.vz > 0){ o.vz -= 1400*dt; o.hz += o.vz*dt; if(o.hz <= 0){ o.hz = 0; o.vz = 0; } }
+  const c = Math.abs(Math.cos(o.a)), sn = Math.abs(Math.sin(o.a));
+  o.w = c*o.L + sn*o.Wd; o.h = sn*o.L + c*o.Wd;
+  if(ns < 15 && Math.abs(o.wz) < .3 && o.hz === 0){ o.skid = false; o.wrecked = true; o.vx = 0; o.svy = 0; o.wz = 0; }
+}
+function carCrash(a, b){
+  if(raceT - (a.lastHit ?? -9) < .35 && raceT - (b.lastHit ?? -9) < .35) return;
+  const [ax, ay] = velOf(a), [bx, by] = velOf(b);
+  const rel = Math.hypot(ax - bx, ay - by);
+  if(rel < 80) return;
+  const e = .3, mx = (ax + bx)/2, my = (ay + by)/2, dx = (ax - bx)/2, dy = (ay - by)/2;
+  const side = Math.sign(b.y - a.y) || 1, k = Math.min(1.6, rel/450);
+  if(rel > 420){
+    const victim = ax < bx ? a : b, hitter = victim === a ? b : a, vs = victim === a ? -side : side;
+    launch(victim, Math.max(ax, bx)*1.2 + 250, vs*rand(300, 650) + (victim === a ? ay : by), rand(950, 1300));
+    startSkid(hitter, Math.max(ax, bx)*.45, -vs*rand(80, 200), rand(3, 6)*(Math.random() < .5 ? -1 : 1), rand(150, 260));
+  } else {
+    startSkid(a, mx - e*dx, my - e*dy - side*rand(60, 180)*k, rand(2, 5)*k*(Math.random() < .5 ? -1 : 1), rand(60, 160)*k);
+    startSkid(b, mx + e*dx, my + e*dy + side*rand(60, 180)*k, rand(2, 5)*k*(Math.random() < .5 ? -1 : 1), rand(60, 160)*k);
+  }
+  if(Math.abs(a.x - player.x) < 1600){
+    sfx(70, .45, 'sawtooth', -30, .1); sfx(400, .15, 'square', -300, .05);
+    text((a.x + b.x)/2, (a.y + b.y)/2, pick(['CRASH!','KERRUNCH!','FENDER BENDER!']), '#ff6b5e', 3.4);
+    burst((a.x + b.x)/2, (a.y + b.y)/2, 1, '#cfe3ff', 16);
+    if(Math.abs(a.x - player.x) < 500) shake = Math.max(shake, .3);
+  }
+}
+function obsCrashes(){
+  for(let i = 0; i < obs.length; i++){
+    const a = obs[i]; if(a.dead || a.fly) continue;
+    for(let j = i + 1; j < obs.length; j++){
+      const b = obs[j]; if(b.dead || b.fly) continue;
+      const la = LIGHT[a.type], lb = LIGHT[b.type];
+      if(!la && !lb){
+        if(!HEAVY[a.type] || !HEAVY[b.type]) continue;
+        if(Math.abs(a.x - b.x) > (a.w + b.w)/2 || Math.abs(a.y - b.y) > (a.h + b.h)/2) continue;
+        carCrash(a, b); continue;
+      }
+      if(!(la || HEAVY[a.type]) || !(lb || HEAVY[b.type])) continue;
+      if(Math.abs(a.x - b.x) > (a.w + b.w)/2 || Math.abs(a.y - b.y) > (a.h + b.h)/2) continue;
+      if(la && lb){
+        // two light things: the faster one plows into the slower one and both go up
+        if(Math.abs(a.vx - b.vx) < 60 && !a.wrecked && !b.wrecked) continue;
+        const fast = a.vx >= b.vx ? a : b, slow = fast === a ? b : a, side = Math.sign(slow.y - fast.y) || 1;
+        launch(slow, Math.max(fast.vx*1.2, 500), side*rand(250, 550), rand(850, 1150));
+        launch(fast, fast.vx*.8, -side*rand(150, 350), rand(600, 850));
+      } else {
+        const lite = la ? a : b, car = la ? b : a, side = Math.sign(lite.y - car.y) || 1;
+        let vx, vy = side*rand(150, 400);
+        if(car.parked) vx = lite.vx*.55;                       // ran into a parked car: over the bonnet
+        else vx = Math.max(car.vx*1.3, lite.vx) + rand(80, 220);
+        if(car.type === 'turn' && car.phase >= 1) vy += 450;   // swept toward the side street
+        if(car.type === 'pull' && car.phase >= 1){ vy -= 300; vx += 280; }
+        launch(lite, vx*1.4 + 200, vy*1.6, rand(1000, 1350));
+      }
+    }
+  }
+}
+
+function collide(r, o){
+  if(r.starT > 0){
+    const side = Math.sign(o.y - r.y) || 1;
+    launch(o, Math.max(r.speed*2.4, o.vx*1.3) + 600, side*rand(350, 750), rand(1150, 1500));
+    o.skid = false; o.parked = false; if(o.haz) o.haz.forEach(m => m.visible = false); o.haz = null;
+    if(r.onVan === o) r.onVan = null;
+    if(r.isPlayer){ text(o.x, o.y, pick(['SMASH!','OUTTA MY LANE!','BOWLED OVER!']), '#ffcc1a', 3.2); shake = Math.max(shake, .35); sfx(90, .3, 'sawtooth', -40, .09); }
+    return;
+  }
+  const h = HIT[o.type];
+  r.hp -= h.dmg; r.hits++;
+  r.speed *= h.keep; r.inv = .9;
+  const dir = Math.sign(r.y - o.y) || 1;
+  r.kvy = dir * (o.type==='pothole'||o.type==='cone' ? 120 : 300);
+  if(o.type==='road') r.kvy = 520;
+  burst(r.x + 18, r.y, .8, '#ffd27a', 10);
+  if(r.isPlayer){
+    text(r.x, r.y, pick(h.msg), '#ff6b5e', 2.6);
+    sfx(o.type==='pothole'?160:110, .2, 'square', -60, .08);
+    shake = Math.max(shake, o.type==='pothole'||o.type==='cone' ? .15 : .4);
+  }
+  if(o.type==='cone'){ o.dead = true; burst(o.x, o.y, .4, '#ff6a13', 8); }
+  // light things you hit go flying; fast things that hit you send you flying
+  if(LIGHT[o.type]) launch(o, Math.max(r.speed*1.8, o.vx) + 300, dir*-1*rand(250, 500), rand(850, 1150));
+  if((o.type==='road' || o.type==='turn' || o.type==='pull' || (o.type==='moped' && o.vx > r.speed)) && r.z < 5){
+    r.vz = o.type === 'moped' ? 380 : 560; r.tumble = true; r.tspin = 0; r.onVan = null;
+  }
+  if(r.hp <= 0) wipeout(r);
+}
+
+function text(x, y, s, col, h=2.4){ fx.push({ x, y, h, s, col, t:1 }); }
+function burst(x, y, h, col, n){ for(let i=0;i<n;i++) parts.push({ x, y, h, vx: rand(-160,160), vy: rand(-160,160), vh: rand(1,5), t: rand(.3,.6), col }); }
+
+// ---------- AI ----------
+function laneFree(y, x){
+  for(const o of obs){
+    if(o.dead) continue;
+    if(Math.abs(o.x - x) < o.w/2 + 70 && Math.abs(o.y - y) < o.h/2 + 14) return false;
+  }
+  return true;
+}
+
+function updateAI(r, dt){
+  if(r.wipe > 0 || r.finished && r.x > FINISH + 1200){ r.boosting = false; return; }
+  const prog = clamp(r.x / FINISH, 0, 1);
+  let target = r.cruise + 26*prog;
+  const gap = r.x - player.x;
+  if(gap < -380) target += 75; else if(gap < -150) target += 25; else if(gap > 520) target -= 45;
+  r.target = target;
+
+
+
+  let threat = null, tdx = 1e9;
+  for(const o of obs){
+    if(o.dead) continue;
+    const dx = (o.x - o.w/2) - (r.x + 20);
+    if(dx > -o.w && dx < 210 && Math.abs(o.y - r.y) < o.h/2 + 15 && (o.vx < r.speed - 20 || dx < 30)){
+      if(dx < tdx){ tdx = dx; threat = o; }
+    }
+  }
+  for(const o of obs){
+    if(o.type === 'moped' && o.x < r.x && r.x - o.x < 450 && Math.abs(o.y - r.y) < 30 && Math.random() < r.ai.skill){ r.ai.ty = clamp(r.y + (o.y > r.y ? -45 : 45), 296, 396); break; }
+  }
+  if(r.y < ROAD_EDGE + 12){
+    for(const o of obs){
+      if(o.type==='road' && o.x < r.x && r.x - o.x < 420 && o.vx > r.speed && Math.abs(o.y - r.y) < 50){ r.ai.ty = rand(300,380); break; }
+    }
+  }
+  if(threat){
+    if(threat !== r.ai.last){ r.ai.last = threat; r.ai.willJump = Math.random() < r.ai.skill; }
+    const up = threat.y - threat.h/2 - 18, dn = threat.y + threat.h/2 + 18;
+    const opts = [up, dn].filter(y => y >= YMIN && y <= YMAX && laneFree(y, threat.x));
+    if(opts.length){
+      opts.sort((a,b) => (Math.abs(a-r.y) + (a < ROAD_EDGE ? 60 : 0)) - (Math.abs(b-r.y) + (b < ROAD_EDGE ? 60 : 0)));
+      r.ai.ty = opts[0];
+    }
+    const blocked = Math.abs(threat.y - r.y) < threat.h/2 + 10;
+    if(blocked && tdx < 95 && r.ai.willJump) jump(r);
+  } else {
+    r.ai.ty += (r.ai.lane - r.ai.ty) * Math.min(1, dt*.8);
+    for(const pd of pickups){ if(pd.type !== 'pad') continue; const d = pd.x - r.x; if(d > 40 && d < 380 && Math.abs(pd.y - r.y) < 90){ r.ai.ty = pd.y; break; } } // rivals aim for boost pads
+    if(Math.random() < dt*.18) r.ai.lane = rand(298,392);
+  }
+  r.steer = clamp((r.ai.ty - r.y)/28, -1, 1);
+
+}
+
+// ---------- update ----------
+const keys = {};
+function updateRacer(r, dt){
+  r.pcd -= dt; r.pAnim -= dt; r.jcd -= dt; r.inv -= dt; r.boostT = (r.boostT || 0) - dt; r.starT = (r.starT || 0) - dt;
+  if(r.tumble){ r.tspin += dt*13; if(r.z <= 0 && r.vz === 0 && r.tspin > .4) r.tumble = false; }
+  if(r.wipe > 0){
+    r.wipe -= dt; r.spin += dt*11;
+    r.speed = Math.max(0, r.speed - 650*dt);
+    if(r.wipe <= 0){ r.hp = 70; r.inv = 1.5; r.spin = 0; }
+  } else {
+    let target = r.isPlayer ? r.cruise : r.target;
+    if(r.boostT > 0) target += 140; // short boost from a pickup
+    if(r.braking) target = 110;
+    if(r.finished && r.isPlayer) target = 200;
+    const acc = r.speed < target ? 240 : (r.braking ? 650 : 170);
+    r.speed += clamp(target - r.speed, -acc*dt, acc*dt);
+    r.y += r.steer * 235 * dt;
+  }
+  r.lean += (r.steer - r.lean) * Math.min(1, dt*8);
+  r.y += r.kvy * dt; r.kvy *= Math.pow(.015, dt);
+  if(r.y < YMIN){ r.y = YMIN; r.kvy = 0; } if(r.y > YMAX){ r.y = YMAX; r.kvy = 0; }
+  // delivery-truck roofs are something you can land on and ride across
+  if(r.onVan){ const o = r.onVan; if(o.dead || Math.abs(o.x - r.x) > o.w/2 + 6 || Math.abs(o.y - r.y) > o.h/2 + 6) r.onVan = null; }
+  if(r.z > (r.onVan ? roofOf(r.onVan) : 0) || r.vz > 0){
+    r.vz -= 1400*dt; r.z += r.vz*dt;
+    if(r.vz <= 0 && !r.onVan && r.wipe <= 0 && r.z > 36){
+      for(const o of obs) if((o.type === 'van' || o.type === 'car') && !o.dead && r.z <= roofOf(o) + 2 && r.z > roofOf(o) - 30 && Math.abs(o.x - r.x) < o.w/2 && Math.abs(o.y - r.y) < o.h/2 + 4){
+        r.onVan = o;
+        if(r.isPlayer && !o.roofed){ o.roofed = true; text(r.x + 30, r.y, pick(['ROOF RIDE!', o.type === 'van' ? 'ON THE TRUCK!' : 'CAR SURFING!','PARKOUR!']), '#8ef0b0', 4.2); }
+        break;
+      }
+    }
+    const g = r.onVan ? roofOf(r.onVan) : 0;
+    if(r.z <= g){ r.z = g; r.vz = 0; if(r.isPlayer) sfx(90, .08, 'triangle', 0, .05); }
+  }
+  r.x += r.speed * dt;
+  if(!r.finished && r.x >= FINISH){
+    r.finished = true; r.ftime = raceT; r.place = ++finishCount;
+    if(r.isPlayer){
+      sfx(520,.15,'square',0,.06); setTimeout(()=>sfx(780,.3,'square',0,.06),150);
+      if(!best || raceT < best){ best = raceT; r.newBest = true; lsSet('bb3d_best', String(best)); }
+    }
+  }
+}
+
+function update(dt){
+  for(const p of parts){ p.x += p.vx*dt; p.y += p.vy*dt; p.h = Math.max(0, p.h + p.vh*dt); p.vh -= 12*dt; p.vx *= .92; p.vy *= .92; p.t -= dt; }
+  parts = parts.filter(p => p.t > 0);
+  for(const f of fx){ f.t -= dt*.9; f.h += 1.3*dt; }
+  fx = fx.filter(f => f.t > 0);
+  shake = Math.max(0, shake - 1.6*dt);
+
+  if(mode === 'title'){ titleT += dt; return; }
+  if(mode === 'paused') return;
+  if(mode === 'countdown'){
+    const before = Math.ceil(countT);
+    countT -= dt;
+    if(Math.ceil(countT) !== before && countT > 0) sfx(440, .12, 'square', 0, .05);
+    if(countT <= 0){ mode = 'race'; sfx(880, .3, 'square', 0, .06); }
+    camX = player.x - SCREEN_X;
+    return;
+  }
+
+  raceT += player.finished ? 0 : dt;
+  if(player.finished) raceT = player.ftime;
+
+  const ctrl = !player.finished && player.wipe <= 0;
+  player.steer = ctrl ? ((keys.right?1:0) - (keys.left?1:0)) : 0;
+  player.boosting = false;
+  player.braking = false;
+
+  for(const r of racers) if(!r.isPlayer) updateAI(r, dt);
+  for(const r of racers) updateRacer(r, dt);
+
+  for(let i=0;i<racers.length;i++) for(let j=i+1;j<racers.length;j++){
+    const a = racers[i], b = racers[j];
+    if(Math.abs(a.x-b.x) < 40 && Math.abs(a.y-b.y) < 20 && Math.abs(a.z-b.z) < 20){
+      const d = (a.y < b.y ? -1 : 1) * 240 * dt;
+      a.y = clamp(a.y + d, YMIN, YMAX); b.y = clamp(b.y - d, YMIN, YMAX);
+    }
+  }
+
+  const lead = Math.max(...racers.map(r => r.x));
+  while(nextSpawn < Math.max(player.x + 2800, lead + 600) && nextSpawn < FINISH - 350){
+    spawnAt(nextSpawn);
+    const prog = nextSpawn / FINISH;
+    nextSpawn += rand(190, 380) * (1 - .38*prog);
+  }
+  roadT -= dt; if(roadT <= 0){ spawnRoadCar(); roadT = rand(.55, 1.4); }
+  oncT -= dt; if(oncT <= 0){ spawnOncoming(); oncT = rand(.6, 1.6); }
+  for(const sp of spots){ if(!sp.used && sp.x - TURN_R - player.x < 3000){ sp.used = true; if(Math.random() < .5) spawnPuller(sp); } }
+  mopedT -= dt; if(mopedT <= 0 && player.x < FINISH - 600){ spawnMoped(); mopedT = rand(5, 9); }
+
+  const t = performance.now()/1000;
+  for(const o of obs){
+    if(o.fly){ flyStep(o, dt); continue; }
+    if(o.skid){ skidStep(o, dt); continue; }
+    if(o.wrecked) continue;
+    o.x += o.vx * dt;
+    if(o.type === 'moped'){
+      // swerve around anything parked or slow ahead
+      if(!o.blind) for(const c of obs){ if(c !== o && (c.type==='car'||c.type==='van'||c.type==='mobility'||c.type==='pull'||c.wrecked) && !c.fly && c.x > o.x && c.x - o.x < 320 && Math.abs(c.y - o.by) < c.h/2 + 16){ o.by = clamp(o.by + (c.y > 345 ? -1 : 1)*320*dt, 296, 396); } }
+      const ny = o.by + Math.sin(t*2.2 + o.ph)*4;
+      if(!o.warned && o.x < player.x && player.x - o.x < 650){ o.warned = true; sfx(880, .09, 'square', 0, .05); setTimeout(() => sfx(880, .09, 'square', 0, .05), 140); }
+      o.yaw = (ny - o.y) / Math.max(1, o.vx*dt) * .6; o.y = ny;
+    } else if(o.type === 'mobility'){
+      for(const c of obs){ if((c.type==='car'||c.type==='van') && c.x > o.x && c.x - o.x < 140 && Math.abs(c.y - o.y) < c.h/2 + 18){ o.y = Math.max(300, o.y - 40*dt); } }
+      o.y += Math.sin(t*1.3 + o.ph)*6*dt;
+    } else if(o.type === 'turn'){
+      const Xs = o.spot.x - TURN_R;
+      if(o.phase === 0){ if(o.x >= Xs){ o.phase = 1; o.x = Xs; o.vx = 0; o.ang = 0; } }
+      else if(o.phase === 1){
+        o.ang = Math.min(Math.PI/2, o.ang + (o.tv || 150)/TURN_R*dt);
+        o.x = Xs + TURN_R*Math.sin(o.ang); o.y = (o.y0 ?? 210) + TURN_R*(1 - Math.cos(o.ang)); o.a = o.ang;
+        if(o.tv){ // power-slide: the body swings out past the line it is driving, tyres smoking
+          o.a = o.ang + .75*Math.sin(o.ang*2);
+          if(Math.random() < .7) parts.push({ x: o.x - Math.cos(o.a)*45, y: o.y - Math.sin(o.a)*45, h: .3, vx: rand(-40, 40), vy: rand(-40, 40), vh: rand(.5, 1.5), t: rand(.5, .9), col: '#d9dbe0' });
+          if(!o.screech && Math.abs(o.x - player.x) < 1500){ o.screech = true; sfx(1300, .55, 'sawtooth', -500, .035); }
+        }
+        if(o.ang >= Math.PI/2) o.phase = 2;
+      } else { o.y += (o.tv || 150)*dt; if(o.y > (o.spot.kind === 'drive' ? 640 : 1300)) o.dead = true; }
+      const c = Math.abs(Math.cos(o.a)), sn = Math.abs(Math.sin(o.a));
+      o.w = c*o.L + sn*o.Wd; o.h = sn*o.L + c*o.Wd;
+    } else if(o.type === 'pull'){
+      const HOLD = 470, sx = o.spot.x;
+      if(o.phase === -1){ o.wait -= dt; if(o.wait <= 0) o.phase = 0; }
+      else if(o.phase === 0){ o.y = Math.max(HOLD, o.y - 120*dt); if(o.y <= HOLD){ o.hold -= dt; if(o.hold <= 0){ o.phase = 1; o.ang = 0; } } }
+      else if(o.phase === 1){
+        o.ang = Math.min(Math.PI/2, o.ang + 150/TURN_R*dt);
+        o.x = sx + TURN_R*(1 - Math.cos(o.ang)); o.y = 210 + TURN_R*(1 - Math.sin(o.ang)); o.a = -Math.PI/2 + o.ang;
+        if(o.ang >= Math.PI/2){ o.phase = 2; o.a = 0; o.vx = 160; }
+      } else { o.vx = Math.min(560, o.vx + 260*dt); }
+      const c = Math.abs(Math.cos(o.a)), sn = Math.abs(Math.sin(o.a));
+      o.w = c*o.L + sn*o.Wd; o.h = sn*o.L + c*o.Wd;
+    } else if(o.type === 'road'){
+      if(o.vmax) o.vx = Math.min(o.vmax, o.vx + 300*dt);
+      // a driver who decided to turn just takes the corner at speed, whoever is in the bike lane
+      if(o.turnSpot && o.x >= o.turnSpot.x - TURN_R){
+        o.type = 'turn'; o.spot = o.turnSpot; o.tv = Math.max(o.vx, 250); o.vx = 0; o.x = o.spot.x - TURN_R;
+        o.y0 = o.y; o.phase = 1; o.ang = 0; o.a = 0; o.L = o.w; o.Wd = o.h; o.vmax = 0;
+        continue;
+      }
+      for(const c of obs){ if(c !== o && (c.type==='road' || c.type==='turn' || c.type==='pull') && !(o.blind && (c.type !== 'road' || c.wrecked || c.skid)) && Math.abs(c.y - o.y) < 40 && c.x > o.x && c.x - o.x < (c.w+o.w)/2 + 30) o.vx = Math.min(o.vx, c.vx); }
+      if(!o.honked && o.behind && o.x > player.x - 200){ o.honked = true; if(Math.abs(o.y - player.y) < 60) sfx(330, .25, 'sawtooth', 0, .04); }
+    }
+  }
+  obsCrashes();
+  for(const c of oncoming) c.x += c.vx*dt;
+
+  for(const r of racers){
+    if(r.wipe > 0) continue;
+    for(const o of obs){
+      if(o.dead || o.fly || o === r.onVan) continue;
+      if(Math.abs(o.x - r.x) >= o.w/2 + 20 || Math.abs(o.y - r.y) >= o.h/2 + 7) continue;
+      if(r.z > HIT[o.type].zMax){
+        if(r.isPlayer && !o.cleared && (o.type==='car'||o.type==='van'||o.type==='road'||o.type==='turn'||o.type==='pull'||o.type==='moped'||o.type==='mobility')){
+          o.cleared = true; text(r.x + 40, r.y, pick(['AIR!','HOP!','SICK JUMP!']), '#8ef0b0', 3 + r.z*ZS);
+        }
+        continue;
+      }
+      if(r.inv > 0) continue;
+      collide(r, o);
+      if(r.wipe > 0) break;
+    }
+  }
+  for(const p of pickups){
+    if(p.type === 'star'){
+      if(!p.got && Math.abs(p.x - player.x) < 32 && Math.abs(p.y - player.y) < 26 && player.z < 50){
+        p.got = true; player.starT = 5; player.hp = Math.max(player.hp, 60);
+        text(p.x, p.y, 'UNSTOPPABLE!', '#ffcc1a', 3.4); sfx(520, .1, 'square', 0, .06); setTimeout(() => sfx(780, .1, 'square', 0, .06), 90); setTimeout(() => sfx(1040, .25, 'square', 0, .06), 180);
+      }
+      continue;
+    }
+    for(const r of racers){
+      if(r.wipe > 0 || r.z > 6 || Math.abs(p.x - r.x) > 60 || Math.abs(p.y - r.y) > 34) continue;
+      if(r.isPlayer && !(r.boostT > 1.3)){ text(p.x, p.y, 'BOOST!', '#8ef0b0'); sfx(660, .12, 'triangle', 500, .06); }
+      r.boostT = 1.6;
+    }
+  }
+
+  const minX = Math.min(player.x - 700, ...racers.map(r => r.x - 700));
+  obs = obs.filter(o => { const keep = !o.dead && (o.x > minX || (o.type === 'moped' && o.x > minX - 900)); if(!keep) drop(o); return keep; });
+  pickups = pickups.filter(p => { const keep = !p.got && p.x > Math.min(player.x - 400, ...racers.map(r => r.x - 400)); if(!keep) drop(p); return keep; });
+  oncoming = oncoming.filter(c => { const keep = c.x > player.x - 500; if(!keep) drop(c); return keep; });
+
+  camX = player.x - SCREEN_X;
+  if(player.finished){
+    finishDelay += dt;
+    if(finishDelay > 1.2 && mode === 'race') mode = 'finish';
+  }
+}
+
+// ---------- sync 3D ----------
+const camPos = new T.Vector3(), camLook = new T.Vector3(), tmpV = new T.Vector3();
+const cam = { y: 330, ly: 330, h: 3.5, lh: 1.1, init: false };
+function syncScene(dt){
+  const now = performance.now();
+  const blink = Math.floor(now/400) % 2 === 0, fastBlink = Math.floor(now/300) % 2 === 0;
+  for(const o of obs){
+    let yaw = 0;
+    if(o.type === 'moped') yaw = -clamp(o.yaw || 0, -.5, .5);
+    else if(o.a !== undefined) yaw = -o.a;
+    place(o.mesh, o.x, o.y, (o.hz || 0)*ZS, yaw);
+    if(o.rot){ o.mesh.rotation.y += o.rot.y; o.mesh.rotation.x = o.rot.x; o.mesh.rotation.z = o.rot.z; }
+    if(o.haz) for(const h of o.haz) h.visible = blink;
+    if(o.blinkers) for(const h of o.blinkers) h.visible = fastBlink;
+    if(o.flag) o.flag.rotation.y = Math.sin(now/150 + o.ph) * .35;
+  }
+  for(const c of oncoming) place(c.mesh, c.x, c.y, 0, Math.PI);
+  padTex && (padTex.offset.y = -(now/400) % 1);
+  for(const p of pickups){
+    if(p.type === 'star'){ place(p.mesh, p.x, p.y, 1 + Math.sin(now/220 + p.t)*.15); p.spin.rotation.y = now/300; p.spin.rotation.x = Math.sin(now/400)*.4; continue; }
+    place(p.mesh, p.x, p.y, 0);
+    p.padMat.opacity = .6 + .4*Math.sin(now/110 + p.t); p.sign.position.y = 2.6 + Math.sin(now/300 + p.t)*.15;
+  }
+  for(const r of racers){
+    const m = r.mesh;
+    place(m, r.x, r.y, r.z*ZS + .02);
+    if(r.aura){ r.aura.visible = r.starT > 0 && (r.starT > 1.2 || Math.floor(now/90) % 2 === 0); r.aura.scale.setScalar(1 + .08*Math.sin(now/70)); }
+    m.visible = !(r.inv > 0 && r.wipe <= 0 && Math.floor(r.inv*12) % 2);
+    if(r.tumble){ r.tilt.rotation.set(r.tspin, r.tspin*.4, r.tspin*.7); } else r.tilt.rotation.set(r.wipe > 0 ? -.3 : (r.z > 0 ? -.15 : 0), r.wipe > 0 ? r.spin : -r.lean*.15, r.wipe > 0 ? 1.1 : -r.lean*.28);
+    for(const s of [-1, 1]){
+      const a = r.arms[s];
+      if(r.pAnim > 0 && s === r.pDir){ a.rotation.set(-.2, -s*1.45, 0); a.scale.set(1, 1, 1.35); }
+      else { a.rotation.set(0, 0, 0); a.scale.set(1, 1, 1); }
+    }
+  }
+
+  // camera: follows the bends of the street, smoothing only the sideways and height moves
+  const k = cam.init ? 1 - Math.exp(-dt*7) : 1; cam.init = true;
+  if(mode === 'title'){
+    const x = titleT*180;
+    toW(x, 250 + Math.sin(titleT*.3)*80, 5.5 + Math.sin(titleT*.2), camPos);
+    toW(x + 420, 320, 1, camLook);
+  } else {
+    const plh = player.z*ZS;
+    const ty = camMode === 0 ? player.y*.6 + 335*.4 : player.y*.4 + 335*.6;
+    const tly = camMode === 0 ? player.y*.75 + 335*.25 : player.y*.5 + 335*.5;
+    const th = camMode === 0 ? 3.5 + plh*.45 : 10;
+    const tlh = camMode === 0 ? 1.1 + plh*.3 : 0;
+    cam.y += (ty - cam.y)*k; cam.ly += (tly - cam.ly)*k; cam.h += (th - cam.h)*k; cam.lh += (tlh - cam.lh)*k;
+    const back = camMode === 0 ? 6.8 : 9.5, ahead = camMode === 0 ? 14 : 10;
+    toW(player.x - back*PX_PER_M, cam.y, cam.h, camPos);
+    toW(player.x + ahead*PX_PER_M, cam.ly, cam.lh, camLook);
+  }
+  camera.position.copy(camPos);
+  if(shake > 0) camera.position.add(tmpV.set(rand(-shake, shake), rand(-shake, shake)*.6, rand(-shake, shake)));
+  camera.lookAt(camLook);
+  const fovT = mode === 'race' && player.boostT > 0 ? 70 : 62;
+  camera.fov += (fovT - camera.fov) * Math.min(1, dt*4); camera.updateProjectionMatrix();
+
+  // sun follows the action so shadows stay crisp
+  toW(mode === 'title' ? titleT*180 + 300 : player.x + 200, 300, 0, tmpV);
+  sun.position.set(tmpV.x + 14, 30, tmpV.z + 8); sun.target.position.copy(tmpV); sun.target.updateMatrixWorld();
+}
+
+// projection helper for the 2D overlay
+const pv = new T.Vector3();
+function proj(x, y, h){
+  toW(x, y, h, pv).project(camera);
+  return { x: (pv.x + 1)/2*W, y: (1 - pv.y)/2*H, ok: pv.z < 1 && pv.z > -1 && pv.x > -1.2 && pv.x < 1.2 };
+}
+
+// =====================================================================
+// HUD overlay
+// =====================================================================
+let fontsReady = false;
+function getFont(role){
+  if(role === 'display') return fontsReady ? 'Bungee, Impact, sans-serif' : 'Impact, "Arial Black", sans-serif';
+  return fontsReady ? '"Chakra Petch", system-ui, sans-serif' : 'system-ui, sans-serif';
+}
+function playerRank(){
+  if(player.finished) return player.place;
+  return 1 + racers.filter(r => !r.isPlayer && (r.finished || r.x > player.x)).length;
+}
+function bar(x, y, w, h, v, col, label){
+  ctx.fillStyle = 'rgba(10,12,16,.72)'; rr(x - 6, y - 18, w + 12, h + 24, 6);
+  ctx.font = '700 11px ' + getFont('body'); ctx.fillStyle = '#d6d9e0'; ctx.fillText(label, x, y - 5);
+  ctx.fillStyle = '#2b2f3a'; rr(x, y, w, h, 3);
+  ctx.fillStyle = col; if(v > 0) rr(x, y, w*clamp(v,0,1), h, 3);
+}
+function centerText(s, y, size, col, font){
+  ctx.font = (font === 'body' ? '700 ' : '') + size + 'px ' + getFont(font || 'display');
+  ctx.textAlign = 'center';
+  ctx.fillStyle = 'rgba(0,0,0,.55)'; ctx.fillText(s, W/2 + 3, y + 3);
+  ctx.fillStyle = col; ctx.fillText(s, W/2, y);
+  ctx.textAlign = 'left';
+}
+function dim(a){ ctx.fillStyle = 'rgba(12,13,18,' + a + ')'; ctx.fillRect(0, 0, W, H); }
+
+function drawWorldLabels(){
+  // rival name tags
+  ctx.textAlign = 'center';
+  for(const r of racers){
+    if(r.isPlayer && !(mode === 'countdown' || (mode === 'race' && raceT < 3))) continue;
+    const dist = Math.abs(r.x - player.x);
+    if(!r.isPlayer && dist > 1600) continue;
+    const p = proj(r.x, r.y, 2.35 + r.z*ZS);
+    if(!p.ok) continue;
+    const label = r.isPlayer ? 'YOU' : r.name;
+    ctx.font = (r.isPlayer ? '12px ' + getFont('display') : '700 11px ' + getFont('body'));
+    const tw = ctx.measureText(label).width + 10;
+    ctx.fillStyle = 'rgba(0,0,0,.55)'; rr(p.x - tw/2, p.y - 13, tw, 16, 4);
+    ctx.fillStyle = r.color; ctx.fillText(label, p.x, p.y);
+    // little health pip for rivals
+    if(!r.isPlayer){ ctx.fillStyle = '#2b2f3a'; ctx.fillRect(p.x - tw/2, p.y + 4, tw, 3); ctx.fillStyle = r.hp < 35 ? '#ff4d3d' : '#8ef0b0'; ctx.fillRect(p.x - tw/2, p.y + 4, tw*clamp(r.hp/100,0,1), 3); }
+  }
+  for(const q of parts){
+    const p = proj(q.x, q.y, q.h); if(!p.ok) continue;
+    ctx.globalAlpha = clamp(q.t*2.5, 0, 1); ctx.fillStyle = q.col; ctx.fillRect(p.x - 2.5, p.y - 2.5, 5, 5);
+  }
+  ctx.globalAlpha = 1;
+  for(const f of fx){
+    const p = proj(f.x, f.y, f.h); if(!p.ok) continue;
+    ctx.globalAlpha = clamp(f.t*1.6, 0, 1);
+    ctx.font = '22px ' + getFont('display');
+    ctx.fillStyle = 'rgba(0,0,0,.6)'; ctx.fillText(f.s, p.x + 2, p.y + 2);
+    ctx.fillStyle = f.col; ctx.fillText(f.s, p.x, p.y);
+  }
+  ctx.globalAlpha = 1; ctx.textAlign = 'left';
+}
+
+function drawHUD(){
+  const rank = playerRank();
+  ctx.fillStyle = 'rgba(10,12,16,.72)'; rr(10, 8, 150, 52, 8);
+  ctx.font = '34px ' + getFont('display'); ctx.fillStyle = rank === 1 ? '#ffcc1a' : '#f3efe4';
+  ctx.fillText(ord(rank), 20, 47);
+  ctx.font = '700 14px ' + getFont('body'); ctx.fillStyle = '#a3a7b3'; ctx.fillText('/ 4', 108, 46);
+
+  const px = 300, pw = 360, py = 22;
+  ctx.fillStyle = 'rgba(10,12,16,.72)'; rr(px - 14, 8, pw + 28, 34, 8);
+  ctx.fillStyle = '#3a3f4b'; rr(px, py, pw, 6, 3);
+  ctx.fillStyle = '#fafafa'; ctx.fillRect(px + pw - 2, py - 6, 4, 18);
+  for(const r of racers){
+    const f = clamp(r.x / FINISH, 0, 1);
+    ctx.fillStyle = r.color; circ(px + f*pw, py + 3, r.isPlayer ? 7 : 5);
+    if(r.isPlayer){ ctx.strokeStyle = '#111'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(px + f*pw, py + 3, 7, 0, 7); ctx.stroke(); }
+  }
+  ctx.font = '700 11px ' + getFont('body'); ctx.fillStyle = '#d6d9e0'; ctx.textAlign = 'center';
+  ctx.fillText(Math.max(0, Math.ceil((FINISH - player.x)/PX_PER_M)) + ' m to go', px + pw/2, 39); ctx.textAlign = 'left';
+
+  ctx.fillStyle = 'rgba(10,12,16,.72)'; rr(W - 160, 8, 150, 52, 8);
+  ctx.font = '700 12px ' + getFont('body'); ctx.fillStyle = '#a3a7b3'; ctx.fillText('TIME', W - 148, 26);
+  ctx.font = '22px ' + getFont('display'); ctx.fillStyle = '#f3efe4'; ctx.fillText(fmtTime(raceT), W - 148, 51);
+
+  if(player.starT > 0) bar(22, 452, 170, 12, player.starT/5, '#ffcc1a', 'UNSTOPPABLE');
+  bar(22, 494, 170, 12, player.hp/100, player.hp < 35 ? '#ff4d3d' : '#ff8f6b', 'HEALTH');
+  const kmh = Math.round(player.speed / PX_PER_M * 3.6);
+  ctx.fillStyle = 'rgba(10,12,16,.72)'; rr(W - 150, 476, 140, 42, 6);
+  ctx.font = '24px ' + getFont('display'); ctx.fillStyle = '#f3efe4'; ctx.textAlign = 'right';
+  ctx.fillText(String(kmh), W - 62, 509);
+  ctx.font = '700 12px ' + getFont('body'); ctx.fillStyle = '#a3a7b3'; ctx.fillText('km/h', W - 20, 508); ctx.textAlign = 'left';
+
+  for(const o of obs){
+    if(o.type !== 'moped' || o.fly || o.wrecked || o.vx <= player.speed || o.x > player.x - 20 || player.x - o.x > 900) continue;
+    const q = proj(player.x + 40, o.y, .3), a = .6 + .4*Math.sin(performance.now()/55);
+    const x = clamp(q.x, 90, W - 90), y = 440;
+    ctx.fillStyle = 'rgba(255,163,26,' + a + ')';
+    ctx.beginPath(); ctx.moveTo(x - 22, y + 14); ctx.lineTo(x, y - 8); ctx.lineTo(x + 22, y + 14); ctx.lineTo(x + 12, y + 14); ctx.lineTo(x, y + 3); ctx.lineTo(x - 12, y + 14); ctx.closePath(); ctx.fill();
+    ctx.font = '16px ' + getFont('display'); ctx.textAlign = 'center'; ctx.fillStyle = 'rgba(0,0,0,.55)'; ctx.fillText('MOPED BEHIND!', x + 2, y - 12); ctx.fillStyle = '#ffa31a'; ctx.fillText('MOPED BEHIND!', x, y - 14); ctx.textAlign = 'left';
+  }
+  if(player.wipe > 0) centerText('WIPEOUT!', 250, 46, '#ff4d3d');
+}
+
+function drawTitle(){
+  dim(.5);
+  ctx.save(); ctx.translate(W/2, 150); ctx.rotate(-.04);
+  ctx.textAlign = 'center';
+  ctx.font = '74px ' + getFont('display');
+  ctx.fillStyle = '#1d4f35'; ctx.fillText('BIKELANE', 6, 6);
+  ctx.fillStyle = '#5be38a'; ctx.fillText('BIKELANE', 0, 0);
+  ctx.font = '86px ' + getFont('display');
+  ctx.fillStyle = '#6b4a00'; ctx.fillText('BRAWLERS', 6, 88);
+  ctx.fillStyle = '#ffcc1a'; ctx.fillText('BRAWLERS', 0, 82);
+  ctx.font = '22px ' + getFont('display'); ctx.fillStyle = '#f3efe4'; ctx.fillText('3D', 250, 118);
+  ctx.restore();
+  ctx.textAlign = 'center';
+  ctx.font = '700 17px ' + getFont('body'); ctx.fillStyle = '#f3efe4';
+  ctx.fillText('1.5 km of bike lane. Four e-scooters. No rules.', W/2, 300);
+  ctx.font = '500 14px ' + getFont('body'); ctx.fillStyle = '#e1e3e8';
+  ctx.fillText('Jump parked cars, ride the delivery trucks, and dodge turning cars, mopeds and mobility scooters.', W/2, 326);
+  ctx.fillText('Stay out of the road: traffic comes up behind you fast.', W/2, 348);
+  if(Math.floor(titleT*2) % 2 === 0){ ctx.font = '22px ' + getFont('display'); ctx.fillStyle = '#ffcc1a'; ctx.fillText(isTouch ? 'TAP TO RACE' : 'PRESS SPACE TO RACE', W/2, 410); }
+  if(best){ ctx.font = '700 14px ' + getFont('body'); ctx.fillStyle = '#e1e3e8'; ctx.fillText('Your best time: ' + fmtTime(best), W/2, 440); }
+  ctx.textAlign = 'left';
+}
+
+function drawFinish(){
+  dim(.68);
+  const p = player;
+  centerText(p.place === 1 ? 'YOU WON!' : 'YOU FINISHED ' + ord(p.place).toUpperCase(), 120, 52, p.place === 1 ? '#ffcc1a' : '#f3efe4');
+  ctx.textAlign = 'center'; ctx.font = '700 16px ' + getFont('body'); ctx.fillStyle = '#c9ccd4';
+  const quip = ['Lane legend.','Respectable brawling.','Bronze is still metal.','The mobility scooters were faster.'][p.place-1];
+  ctx.fillText(quip + (p.newBest ? '  New personal best!' : ''), W/2, 152);
+  const rows = racers.slice().sort((a,b) => (a.finished && b.finished) ? a.place - b.place : a.finished ? -1 : b.finished ? 1 : b.x - a.x);
+  const tx = W/2 - 220, ty = 190;
+  ctx.textAlign = 'left'; ctx.font = '700 12px ' + getFont('body'); ctx.fillStyle = '#a3a7b3';
+  ctx.fillText('POS', tx, ty); ctx.fillText('RIDER', tx + 60, ty); ctx.fillText('HITS', tx + 270, ty); ctx.fillText('TIME', tx + 340, ty);
+  rows.forEach((r, i) => {
+    const y = ty + 34 + i*36;
+    if(r.isPlayer){ ctx.fillStyle = 'rgba(255,204,26,.14)'; rr(tx - 12, y - 24, 464, 34, 6); }
+    ctx.font = '18px ' + getFont('display'); ctx.fillStyle = r.color; ctx.fillText(String(i+1), tx, y);
+    ctx.font = '700 17px ' + getFont('body'); ctx.fillStyle = '#f3efe4'; ctx.fillText(r.isPlayer ? 'You' : r.name, tx + 60, y);
+    ctx.fillText(String(r.hits), tx + 270, y);
+    ctx.fillStyle = r.finished ? '#f3efe4' : '#a3a7b3';
+    ctx.fillText(r.finished ? fmtTime(r.ftime) : 'still riding', tx + 340, y);
+  });
+  ctx.textAlign = 'center'; ctx.font = '700 14px ' + getFont('body'); ctx.fillStyle = '#c9ccd4';
+  ctx.fillText('Best time: ' + fmtTime(best), W/2, 370);
+  if(Math.floor(performance.now()/500) % 2 === 0){ ctx.font = '20px ' + getFont('display'); ctx.fillStyle = '#ffcc1a'; ctx.fillText(isTouch ? 'TAP TO RACE AGAIN' : 'PRESS SPACE TO RACE AGAIN', W/2, 420); }
+  ctx.textAlign = 'left';
+}
+
+function render(dt){
+  syncScene(dt);
+  renderer.render(scene, camera);
+  ctx.setTransform(K, 0, 0, K, 0, 0);
+  ctx.clearRect(0, 0, W, H);
+  if(mode === 'title'){ drawTitle(); return; }
+  drawWorldLabels();
+  drawHUD();
+  if(mode === 'countdown'){
+    const n = Math.ceil(countT);
+    centerText(n > 0 ? String(n) : 'GO!', 250, 110, n > 0 ? '#f3efe4' : '#5be38a');
+    centerText('← → steer · Space jump', 196, 16, '#f3efe4', 'body');
+  } else if(mode === 'race' && raceT < 1.2){
+    centerText('GO!', 250, 110, '#5be38a');
+  } else if(mode === 'paused'){
+    dim(.55); centerText('PAUSED', 260, 56, '#f3efe4'); centerText(isTouch ? 'Tap to resume' : 'Press P to resume', 300, 16, '#c9ccd4', 'body');
+  } else if(mode === 'finish') drawFinish();
+}
+
+// ---------- input ----------
+let isTouch = false;
+function startRace(){ initAudio(); reset(); mode = 'countdown'; }
+function onPress(k){
+  initAudio();
+  if(k === 'mute'){ muted = !muted; return; }
+  if(k === 'camera'){ camMode = (camMode + 1) % 2; return; }
+  if(mode === 'title' || mode === 'finish'){ if(k === 'jump' || k === 'enter' || k === 'tap') startRace(); return; }
+  if(k === 'pause'){ if(mode === 'paused') mode = prevMode; else if(mode === 'race' || mode === 'countdown'){ prevMode = mode; mode = 'paused'; } return; }
+  if(mode === 'paused'){ if(k === 'tap') mode = prevMode; return; }
+  if(k === 'restart'){ startRace(); return; }
+  if(mode !== 'race' || player.finished) return;
+  if(k === 'jump') jump(player);
+}
+const KEYMAP = { ArrowLeft:'left', KeyA:'left', ArrowRight:'right', KeyD:'right', 
+  Space:'jump', KeyC:'camera', KeyP:'pause', Escape:'pause', KeyM:'mute', KeyR:'restart', Enter:'enter' };
+addEventListener('keydown', e => {
+  const k = KEYMAP[e.code]; if(!k) return;
+  e.preventDefault();
+  if(!keys[k]) onPress(k);
+  keys[k] = true;
+});
+addEventListener('keyup', e => { const k = KEYMAP[e.code]; if(k) keys[k] = false; });
+addEventListener('blur', () => { for(const k in keys) keys[k] = false; if(mode === 'race'){ prevMode = 'race'; mode = 'paused'; } });
+
+function enableTouch(){ if(isTouch) return; isTouch = true; document.body.classList.add('touch'); fit(); }
+if(matchMedia('(pointer: coarse)').matches) enableTouch();
+addEventListener('touchstart', enableTouch, { passive:true });
+stage.addEventListener('pointerdown', e => { e.preventDefault(); onPress('tap'); });
+document.querySelectorAll('#pad button').forEach(b => {
+  const k = b.dataset.k;
+  const down = e => { e.preventDefault(); b.setPointerCapture?.(e.pointerId); b.classList.add('on'); if(!keys[k]) onPress(k === 'jump' && mode !== 'race' ? 'tap' : k); keys[k] = true; };
+  const up = () => { b.classList.remove('on'); keys[k] = false; };
+  b.addEventListener('pointerdown', down);
+  b.addEventListener('pointerup', up); b.addEventListener('pointercancel', up); b.addEventListener('lostpointercapture', up);
+  b.addEventListener('contextmenu', e => e.preventDefault());
+});
+
+// ---------- sizing ----------
+function fit(){
+  const extra = isTouch ? document.getElementById('pad').offsetHeight : document.getElementById('legend').offsetHeight;
+  const availW = document.body.clientWidth - 32;
+  const availH = window.innerHeight - extra - 44;
+  const w = Math.max(240, Math.min(availW, availH * 16/9, 1280)), h = w * 9/16;
+  stage.style.width = w + 'px'; stage.style.height = h + 'px';
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  renderer.setPixelRatio(dpr); renderer.setSize(w, h, false);
+  hud.width = Math.round(w * dpr); hud.height = Math.round(h * dpr);
+  K = hud.width / W;
+  camera.aspect = w / h; camera.updateProjectionMatrix();
+}
+addEventListener('resize', fit);
+document.addEventListener('visibilitychange', () => { if(document.hidden && mode === 'race'){ prevMode = 'race'; mode = 'paused'; } });
+if(document.fonts && document.fonts.load){
+  Promise.all([document.fonts.load('40px Bungee'), document.fonts.load('700 16px "Chakra Petch"')]).then(() => {
+    fontsReady = document.fonts.check('40px Bungee');
+    if(finishBanner){ // redraw the banner now that the display face is in
+      const c = finishBanner.tex.image.getContext('2d');
+      c.fillStyle = '#ffcc1a'; c.fillRect(0, 12, 1024, 72);
+      c.fillStyle = '#15171d'; c.font = '56px Bungee, Impact, sans-serif'; c.textAlign = 'center'; c.fillText('FINISH  ·  BIKELANE BRAWLERS', 512, 68);
+      finishBanner.tex.needsUpdate = true;
+    }
+  }).catch(()=>{});
+}
+
+// ---------- loop ----------
+reset();
+fit();
+let last = performance.now();
+function frame(now){
+  const dt = Math.min(.05, (now - last)/1000); last = now;
+  update(dt);
+  render(dt);
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+window.__bb = { addObs, get pickups(){ return pickups; }, spawnMoped, spawnPuller, get spots(){ return spots; }, get mode(){ return mode; }, get player(){ return player; }, get racers(){ return racers; }, get obs(){ return obs; }, startRace, keys, onPress, setCam(m){ camMode = m; } };
+})();
+</script>
+<script>
+// Offline + over-the-air updates. A new deploy installs in the background; the toast swaps it in.
+if('serviceWorker' in navigator){
+  const btn = document.getElementById('upd');
+  let reloading = false;
+  const offer = w => { btn.hidden = false; btn.onclick = () => { btn.textContent = 'Updating…'; w.postMessage('skipWaiting'); }; };
+  navigator.serviceWorker.addEventListener('controllerchange', () => { if(reloading) return; reloading = true; location.reload(); });
+  navigator.serviceWorker.register('sw.js').then(reg => {
+    if(reg.waiting && navigator.serviceWorker.controller) offer(reg.waiting);
+    reg.addEventListener('updatefound', () => {
+      const w = reg.installing;
+      w && w.addEventListener('statechange', () => { if(w.state === 'installed' && navigator.serviceWorker.controller) offer(w); });
+    });
+    // Home-screen apps on iOS resume instead of relaunching, so check for a new version whenever it comes back to the front.
+    document.addEventListener('visibilitychange', () => { if(!document.hidden) reg.update().catch(()=>{}); });
+  }).catch(()=>{});
+}
+</script>
+</body>
+</html>
